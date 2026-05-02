@@ -1,44 +1,63 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { QueryClient, QueryClientProvider } from 'react-query';
+import ErrorBoundary from './components/UI/ErrorBoundary';
+import LoadingSpinner from './components/UI/LoadingSpinner';
 
 // Layout Components
 import Layout from './components/Layout/Layout';
 import Sidebar from './components/Layout/Sidebar';
 import Header from './components/Layout/Header';
 
-// Page Components
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Orders from './pages/Orders';
-import Kitchen from './pages/Kitchen';
-import Tables from './pages/Tables';
-import Menu from './pages/Menu';
-import Reservations from './pages/Reservations';
-import Delivery from './pages/Delivery';
-import Users from './pages/Users';
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
-import Profile from './pages/Profile';
+// Lazy load page components for code splitting
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Orders = lazy(() => import('./pages/Orders'));
+const Kitchen = lazy(() => import('./pages/Kitchen'));
+const Tables = lazy(() => import('./pages/Tables'));
+const Menu = lazy(() => import('./pages/Menu'));
+const Reservations = lazy(() => import('./pages/Reservations'));
+const Delivery = lazy(() => import('./pages/Delivery'));
+const Users = lazy(() => import('./pages/Users'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Profile = lazy(() => import('./pages/Profile'));
 
-// Loading Component
-import LoadingSpinner from './components/UI/LoadingSpinner';
-
-// Create React Query client
+// Create React Query client with enhanced configuration
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error) => {
+        // Don't retry on 4xx errors
+        if (error?.response?.status >= 400 && error?.response?.status < 500) {
+          return false;
+        }
+        return failureCount < 3;
+      },
       refetchOnWindowFocus: false,
       staleTime: 5 * 60 * 1000, // 5 minutes
+      cacheTime: 10 * 60 * 1000, // 10 minutes
+      refetchOnReconnect: true,
+      suspense: false,
+    },
+    mutations: {
+      retry: 1,
     },
   },
 });
 
-// Protected Route Component
+// Loading fallback component for lazy loading
+const PageLoadingFallback = () => (
+  <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 50%, #FEF9C3 100%)' }}>
+    <div className="text-center">
+      <LoadingSpinner size="lg" />
+      <p className="mt-4 text-slate-500 text-sm font-medium">Loading page...</p>
+    </div>
+  </div>
+);
 const ProtectedRoute = ({ children, requiredRole }) => {
   const { user, loading } = useAuth();
 
@@ -88,10 +107,12 @@ const AppContent = () => {
   if (!user) {
     return (
       <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoadingFallback />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
         <Toaster
           position="top-right"
           toastOptions={{
@@ -134,142 +155,144 @@ const AppContent = () => {
 
             {/* Page content */}
             <main className="p-4 lg:p-6 min-h-[calc(100vh-4rem)]">
-              <Routes>
-                {/* Dashboard - accessible to all roles */}
-                <Route
-                  path="/"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Dashboard />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+              <Suspense fallback={<PageLoadingFallback />}>
+                <Routes>
+                  {/* Dashboard - accessible to all roles */}
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Dashboard />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Orders - accessible to all roles */}
-                <Route
-                  path="/orders"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Orders />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Orders - accessible to all roles */}
+                  <Route
+                    path="/orders"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Orders />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Kitchen - accessible to all roles */}
-                <Route
-                  path="/kitchen"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Kitchen />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Kitchen - accessible to all roles */}
+                  <Route
+                    path="/kitchen"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Kitchen />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Tables - accessible to all roles */}
-                <Route
-                  path="/tables"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Tables />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Tables - accessible to all roles */}
+                  <Route
+                    path="/tables"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Tables />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Menu - admin only */}
-                <Route
-                  path="/menu"
-                  element={
-                    <ProtectedRoute requiredRole="admin">
-                      <Layout>
-                        <Menu />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Menu - admin only */}
+                  <Route
+                    path="/menu"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Menu />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Reservations - accessible to all roles */}
-                <Route
-                  path="/reservations"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Reservations />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Reservations - accessible to all roles */}
+                  <Route
+                    path="/reservations"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Reservations />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Delivery - accessible to all roles */}
-                <Route
-                  path="/delivery"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Delivery />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Delivery - accessible to all roles */}
+                  <Route
+                    path="/delivery"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Delivery />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Users - admin only */}
-                <Route
-                  path="/users"
-                  element={
-                    <ProtectedRoute requiredRole="admin">
-                      <Layout>
-                        <Users />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Users - admin only */}
+                  <Route
+                    path="/users"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Users />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Reports - admin only */}
-                <Route
-                  path="/reports"
-                  element={
-                    <ProtectedRoute requiredRole="admin">
-                      <Layout>
-                        <Reports />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Reports - admin only */}
+                  <Route
+                    path="/reports"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Reports />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Settings - admin only */}
-                <Route
-                  path="/settings"
-                  element={
-                    <ProtectedRoute requiredRole="admin">
-                      <Layout>
-                        <Settings />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Settings - admin only */}
+                  <Route
+                    path="/settings"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Settings />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Profile - accessible to all roles */}
-                <Route
-                  path="/profile"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Profile />
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Profile - accessible to all roles */}
+                  <Route
+                    path="/profile"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Profile />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Catch all route */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+                  {/* Catch all route */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
             </main>
           </div>
         </div>
@@ -299,11 +322,15 @@ const AppContent = () => {
 // Main App Component
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ErrorBoundary>
+            <AppContent />
+          </ErrorBoundary>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

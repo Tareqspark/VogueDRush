@@ -15,7 +15,7 @@ const STATUS_BADGES = {
   occupied:  'bg-rose-50 text-rose-700 border-rose-200',
   reserved:  'bg-amber-50 text-amber-700 border-amber-200',
 };
-const STATUS_ICONS = { available: '🟢', occupied: '🔴', reserved: '🟡' };
+
 
 export default function Tables() {
   const { api, user } = useAuth();

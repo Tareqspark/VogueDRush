@@ -298,10 +298,11 @@ router.get('/delivery', validateDateRange, async (req, res) => {
         SUM(dd.due_amount) as total_due_amount,
         COUNT(CASE WHEN dd.delivery_status = 'delivered' THEN 1 END) as delivered_count,
         COUNT(CASE WHEN dd.delivery_status = 'cancelled' THEN 1 END) as cancelled_count,
-        COUNT(CASE WHEN dd.payment_collected = 1 THEN 1 END) as payment_collected_count,
-        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as avg_delivery_time
+        COUNT(CASE WHEN dd.due_amount <= 0 THEN 1 END) as no_due_deliveries,
+        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as avg_delivery_time
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
+      LEFT JOIN delivery_tracking dt ON dt.delivery_detail_id = dd.id
       WHERE o.order_type = 'delivery' ${dateFilter}
     `;
     
@@ -328,14 +329,15 @@ router.get('/delivery', validateDateRange, async (req, res) => {
       SELECT 
         DATE(o.created_at) as delivery_date,
         COUNT(*) as delivery_count,
-        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as avg_delivery_time,
-        MIN(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as min_delivery_time,
-        MAX(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as max_delivery_time
+        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as avg_delivery_time,
+        MIN(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as min_delivery_time,
+        MAX(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as max_delivery_time
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
+      LEFT JOIN delivery_tracking dt ON dt.delivery_detail_id = dd.id
       WHERE o.order_type = 'delivery' 
         AND dd.delivery_status = 'delivered'
-        AND dd.delivered_at IS NOT NULL
+        AND dt.actual_delivery_time IS NOT NULL
         ${dateFilter}
       GROUP BY DATE(o.created_at)
       ORDER BY delivery_date DESC
@@ -351,8 +353,8 @@ router.get('/delivery', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN dd.advance_payment > 0 THEN 1 END) as with_advance_payment,
         SUM(dd.advance_payment) as total_advance_amount,
         AVG(dd.advance_payment) as avg_advance_amount,
-        COUNT(CASE WHEN dd.payment_collected = 1 THEN 1 END) as fully_collected,
-        COUNT(CASE WHEN dd.payment_collected = 0 AND dd.delivery_status = 'delivered' THEN 1 END) as pending_collection
+        COUNT(CASE WHEN dd.due_amount <= 0 THEN 1 END) as no_due_deliveries,
+        COUNT(CASE WHEN dd.due_amount > 0 AND dd.delivery_status = 'delivered' THEN 1 END) as delivered_with_due
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
       WHERE o.order_type = 'delivery' ${dateFilter}
@@ -376,7 +378,7 @@ router.get('/delivery', validateDateRange, async (req, res) => {
 // Cancellation reports
 router.get('/cancellations', validateDateRange, async (req, res) => {
   try {
-    const { start_date, end_date, reason } = req.query;
+    const { start_date, end_date } = req.query;
     
     let dateFilter = '';
     let values = [];
@@ -384,12 +386,6 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
     if (start_date && end_date) {
       dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
-    }
-    
-    let reasonFilter = '';
-    if (reason) {
-      reasonFilter = 'AND (o.cancellation_reason LIKE ? OR kq_cancellation.reason LIKE ?)';
-      values.push(`%${reason}%`, `%${reason}%`);
     }
     
     // Cancellation overview
@@ -413,11 +409,10 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
         o.order_type,
         COUNT(*) as cancellation_count,
         SUM(o.total_amount) as lost_revenue,
-        AVG(o.total_amount) as avg_order_value,
-        o.cancellation_reason
+        AVG(o.total_amount) as avg_order_value
       FROM orders o
       WHERE o.status = 'cancelled' ${dateFilter}
-      GROUP BY o.order_type, o.cancellation_reason
+      GROUP BY o.order_type
       ORDER BY cancellation_count DESC
     `;
     
@@ -430,15 +425,14 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
         fc.name as category_name,
         COUNT(kq.id) as cancellation_count,
         SUM(oi.quantity) as total_quantity_cancelled,
-        SUM(oi.total_price) as lost_revenue,
-        kq.reason
+        SUM(oi.total_price) as lost_revenue
       FROM kitchen_queue kq
       JOIN order_items oi ON kq.order_item_id = oi.id
       JOIN food_items fi ON oi.food_item_id = fi.id
       JOIN food_categories fc ON fi.category_id = fc.id
       JOIN orders o ON kq.order_id = o.id
       WHERE kq.status = 'cancelled' ${dateFilter}
-      GROUP BY fi.id, fi.name, fc.name, kq.reason
+      GROUP BY fi.id, fi.name, fc.name
       ORDER BY cancellation_count DESC
       LIMIT 50
     `;
@@ -489,7 +483,8 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
       max_amount 
     } = req.query;
     
-    const offset = (page - 1) * limit;
+    const limitInt = parseInt(limit, 10) || 100;
+    const offsetInt = (parseInt(page, 10) - 1) * limitInt;
     let whereClause = 'o.status IN ("done", "cancelled")';
     let values = [];
     

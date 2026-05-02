@@ -494,8 +494,7 @@ router.patch('/:id/status', validateId, async (req, res) => {
     // Update reservation status
     await update('reservations', { 
       status, 
-      updated_at: new Date(),
-      ...(status === 'cancelled' && { cancellation_reason: reason })
+      updated_at: new Date()
     }, { id });
     
     // If confirming reservation, update table status
@@ -570,8 +569,7 @@ router.delete('/:id', validateId, async (req, res) => {
     // Soft delete by setting status to cancelled
     await update('reservations', { 
       status: 'cancelled', 
-      updated_at: new Date(),
-      cancellation_reason: 'Deleted by user'
+      updated_at: new Date()
     }, { id });
     
     // Emit real-time update

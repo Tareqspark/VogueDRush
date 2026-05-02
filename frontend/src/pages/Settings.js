@@ -24,11 +24,11 @@ export default function Settings() {
   );
 
   const settings = data?.settings || [];
-  const settingMap = Object.fromEntries(settings.map(s => [s.key, s]));
+  const settingMap = Object.fromEntries(settings.map(s => [s.setting_key, s]));
 
   const startEdit = (s) => {
-    setEditKey(s.key);
-    setEditValue(s.value);
+    setEditKey(s.setting_key);
+    setEditValue(s.setting_value);
   };
 
   const cancelEdit = () => { setEditKey(null); setEditValue(''); };
@@ -36,7 +36,7 @@ export default function Settings() {
   const saveEdit = async (key) => {
     setSaving(true);
     try {
-      await api.put(`/settings/${key}`, { value: editValue });
+      await api.put(`/settings/${key}`, { setting_value: editValue });
       toast.success('Setting saved');
       queryClient.invalidateQueries('settings-all');
       cancelEdit();
@@ -74,7 +74,7 @@ export default function Settings() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-600 font-mono text-sm bg-slate-50 px-2 py-0.5 rounded">{s.value}</span>
+                      <span className="text-slate-600 font-mono text-sm bg-slate-50 px-2 py-0.5 rounded">{String(s.parsed_value ?? s.setting_value ?? '')}</span>
                       <button onClick={() => startEdit(s)} className="btn btn-secondary btn-sm"><PencilIcon className="h-4 w-4" /></button>
                     </div>
                   )}
@@ -88,28 +88,28 @@ export default function Settings() {
       {/* Ungrouped settings */}
       {(() => {
         const grouped = Object.values(SETTING_GROUPS).flat();
-        const rest = settings.filter(s => !grouped.includes(s.key));
+        const rest = settings.filter(s => !grouped.includes(s.setting_key));
         if (!rest.length) return null;
         return (
           <div className="card p-5">
             <h2 className="font-semibold text-slate-800 mb-3 border-b border-slate-200 pb-2">Other</h2>
             <div className="space-y-3">
               {rest.map(s => {
-                const isEditing = editKey === s.key;
+                const isEditing = editKey === s.setting_key;
                 return (
-                  <div key={s.key} className="flex items-center gap-4">
+                  <div key={s.setting_key} className="flex items-center gap-4">
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-slate-800 capitalize">{s.key.replace(/_/g,' ')}</div>
+                      <div className="text-sm font-medium text-slate-800 capitalize">{s.setting_key.replace(/_/g,' ')}</div>
                     </div>
                     {isEditing ? (
                       <div className="flex items-center gap-2">
                         <input className="input w-40" value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus />
-                        <button onClick={() => saveEdit(s.key)} disabled={saving} className="btn btn-success btn-sm"><CheckIcon className="h-4 w-4" /></button>
+                        <button onClick={() => saveEdit(s.setting_key)} disabled={saving} className="btn btn-success btn-sm"><CheckIcon className="h-4 w-4" /></button>
                         <button onClick={cancelEdit} className="btn btn-secondary btn-sm"><XMarkIcon className="h-4 w-4" /></button>
                       </div>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-600 font-mono text-sm bg-slate-50 px-2 py-0.5 rounded">{s.value}</span>
+                        <span className="text-slate-600 font-mono text-sm bg-slate-50 px-2 py-0.5 rounded">{String(s.parsed_value ?? s.setting_value ?? '')}</span>
                         <button onClick={() => startEdit(s)} className="btn btn-secondary btn-sm"><PencilIcon className="h-4 w-4" /></button>
                       </div>
                     )}

@@ -179,7 +179,7 @@ const Login = () => {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-6">
-            © 2025 Vogue D Rush · All rights reserved
+            © 2025 Tarequl Islam Mukul · All rights reserved
           </p>
         </div>
       </div>

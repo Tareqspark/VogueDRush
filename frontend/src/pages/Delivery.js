@@ -147,7 +147,7 @@ export default function Delivery() {
 }
 
 function DeliveryDetailModal({ detail, onClose, onAdvance }) {
-  const { items, payments, payment_summary } = detail;
+  const { items } = detail;
   const next = NEXT_STATUS[detail.delivery_status];
 
   return (

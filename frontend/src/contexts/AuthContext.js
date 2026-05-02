@@ -13,6 +13,7 @@ const initialState = {
   user: null,
   accessToken: null,
   refreshToken: null,
+  sessionToken: null,
   loading: true,
   isAuthenticated: false,
 };
@@ -46,6 +47,7 @@ const authReducer = (state, action) => {
         user: action.payload.user,
         accessToken: action.payload.accessToken,
         refreshToken: action.payload.refreshToken,
+        sessionToken: action.payload.sessionToken,
         isAuthenticated: true,
         loading: false,
         error: null,
@@ -57,6 +59,7 @@ const authReducer = (state, action) => {
         user: null,
         accessToken: null,
         refreshToken: null,
+        sessionToken: null,
         isAuthenticated: false,
         loading: false,
         error: action.payload,
@@ -68,6 +71,7 @@ const authReducer = (state, action) => {
         user: null,
         accessToken: null,
         refreshToken: null,
+        sessionToken: null,
         isAuthenticated: false,
         loading: false,
         error: null,
@@ -84,6 +88,7 @@ const authReducer = (state, action) => {
         ...state,
         accessToken: action.payload.accessToken,
         refreshToken: action.payload.refreshToken,
+        sessionToken: action.payload.sessionToken,
         user: action.payload.user,
         isAuthenticated: true,
         loading: false,
@@ -96,6 +101,7 @@ const authReducer = (state, action) => {
         user: null,
         accessToken: null,
         refreshToken: null,
+        sessionToken: null,
         isAuthenticated: false,
         loading: false,
         error: action.payload,
@@ -154,21 +160,28 @@ export const AuthProvider = ({ children }) => {
 
           try {
             const refreshToken = localStorage.getItem('refreshToken');
-            if (refreshToken) {
+            const sessionToken = localStorage.getItem('sessionToken');
+            if (refreshToken && sessionToken) {
               const response = await axios.post(
                 `${api.defaults.baseURL}/auth/refresh`,
-                { refreshToken }
+                { refreshToken, sessionToken }
               );
 
-              const { accessToken, refreshToken: newRefreshToken, user } = response.data;
+              const { accessToken, refreshToken: newRefreshToken, sessionToken: newSessionToken, user } = response.data;
 
               dispatch({
                 type: AUTH_ACTIONS.REFRESH_SUCCESS,
-                payload: { accessToken, refreshToken: newRefreshToken, user },
+                payload: {
+                  accessToken,
+                  refreshToken: newRefreshToken,
+                  sessionToken: newSessionToken,
+                  user,
+                },
               });
 
               localStorage.setItem('accessToken', accessToken);
               localStorage.setItem('refreshToken', newRefreshToken);
+              localStorage.setItem('sessionToken', newSessionToken);
 
               // Retry the original request
               originalRequest.headers.Authorization = `Bearer ${accessToken}`;
@@ -179,6 +192,7 @@ export const AuthProvider = ({ children }) => {
             dispatch({ type: AUTH_ACTIONS.LOGOUT });
             localStorage.removeItem('accessToken');
             localStorage.removeItem('refreshToken');
+            localStorage.removeItem('sessionToken');
             localStorage.removeItem('user');
             toast.error('Session expired. Please login again.');
             return Promise.reject(refreshError);
@@ -211,16 +225,18 @@ export const AuthProvider = ({ children }) => {
     const initializeAuth = () => {
       const accessToken = localStorage.getItem('accessToken');
       const refreshToken = localStorage.getItem('refreshToken');
+      const sessionToken = localStorage.getItem('sessionToken');
       const userRaw = localStorage.getItem('user');
 
       const clearAndLogout = () => {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('sessionToken');
         localStorage.removeItem('user');
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
       };
 
-      if (accessToken && refreshToken && userRaw) {
+      if (accessToken && refreshToken && sessionToken && userRaw) {
         const decoded = decodeToken(accessToken);
         const now = Math.floor(Date.now() / 1000);
 
@@ -235,7 +251,7 @@ export const AuthProvider = ({ children }) => {
             const user = JSON.parse(userRaw);
             dispatch({
               type: AUTH_ACTIONS.LOGIN_SUCCESS,
-              payload: { user, accessToken, refreshToken },
+              payload: { user, accessToken, refreshToken, sessionToken },
             });
           } catch {
             clearAndLogout();
@@ -243,15 +259,26 @@ export const AuthProvider = ({ children }) => {
         } else {
           // Token expired — try to refresh in the background
           axios
-            .post(`${api.defaults.baseURL}/auth/refresh`, { refreshToken })
+            .post(`${api.defaults.baseURL}/auth/refresh`, { refreshToken, sessionToken })
             .then((res) => {
-              const { accessToken: newAccess, refreshToken: newRefresh, user } = res.data;
+              const {
+                accessToken: newAccess,
+                refreshToken: newRefresh,
+                sessionToken: newSession,
+                user,
+              } = res.data;
               localStorage.setItem('accessToken', newAccess);
               localStorage.setItem('refreshToken', newRefresh);
+              localStorage.setItem('sessionToken', newSession);
               localStorage.setItem('user', JSON.stringify(user));
               dispatch({
                 type: AUTH_ACTIONS.REFRESH_SUCCESS,
-                payload: { accessToken: newAccess, refreshToken: newRefresh, user },
+                payload: {
+                  accessToken: newAccess,
+                  refreshToken: newRefresh,
+                  sessionToken: newSession,
+                  user,
+                },
               });
             })
             .catch(() => clearAndLogout());
@@ -271,22 +298,24 @@ export const AuthProvider = ({ children }) => {
       dispatch({ type: AUTH_ACTIONS.LOGIN_START });
 
       const response = await api.post('/auth/login', credentials);
-      const { user, accessToken, refreshToken } = response.data;
+      const { user, accessToken, refreshToken, sessionToken } = response.data;
 
       // Store in localStorage
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('refreshToken', refreshToken);
+      localStorage.setItem('sessionToken', sessionToken);
       localStorage.setItem('user', JSON.stringify(user));
 
       dispatch({
         type: AUTH_ACTIONS.LOGIN_SUCCESS,
-        payload: { user, accessToken, refreshToken },
+        payload: { user, accessToken, refreshToken, sessionToken },
       });
 
       toast.success(`Welcome back, ${user.full_name}!`);
       return { success: true };
     } catch (error) {
-      const errorMessage = error.response?.data?.error || 'Login failed';
+      const errorMessage = error.response?.data?.error
+        || (error.code === 'ERR_NETWORK' ? 'Cannot connect to server. Please ensure backend is running on port 5000.' : 'Login failed');
       dispatch({
         type: AUTH_ACTIONS.LOGIN_FAILURE,
         payload: errorMessage,
@@ -299,7 +328,10 @@ export const AuthProvider = ({ children }) => {
   // Logout function
   const logout = async () => {
     try {
-      await api.post('/auth/logout', { userId: state.user?.id });
+      await api.post('/auth/logout', {
+        userId: state.user?.id,
+        sessionToken: state.sessionToken || localStorage.getItem('sessionToken'),
+      });
     } catch (error) {
       // Continue with logout even if API call fails
       console.error('Logout API call failed:', error);
@@ -308,6 +340,7 @@ export const AuthProvider = ({ children }) => {
     // Clear localStorage
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
+    localStorage.removeItem('sessionToken');
     localStorage.removeItem('user');
 
     dispatch({ type: AUTH_ACTIONS.LOGOUT });
@@ -318,8 +351,8 @@ export const AuthProvider = ({ children }) => {
   const changePassword = async (passwordData) => {
     try {
       await api.post('/auth/change-password', {
-        userId: state.user.id,
-        ...passwordData,
+        currentPassword: passwordData.currentPassword || passwordData.current_password,
+        newPassword: passwordData.newPassword || passwordData.new_password,
       });
 
       toast.success('Password changed successfully');

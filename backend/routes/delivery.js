@@ -60,22 +60,33 @@ router.get('/', async (req, res) => {
     
     const deliveries = await query(deliveriesQuery, [...values, limitInt, offsetInt]);
     
-    // Get order items for each delivery
-    for (const delivery of deliveries) {
-      const items = await findMany(
-        'order_items',
-        { order_id: delivery.id },
-        'food_item_id, quantity, unit_price, total_price, special_instructions, status'
+    // Get order items for listed deliveries in one query to avoid N+1 queries
+    const deliveryIds = deliveries.map(delivery => delivery.id);
+    let itemsByOrderId = {};
+
+    if (deliveryIds.length > 0) {
+      const placeholders = deliveryIds.map(() => '?').join(', ');
+      const allItems = await query(
+        `SELECT oi.order_id, oi.food_item_id, oi.quantity, oi.unit_price, oi.total_price, oi.special_instructions, oi.status,
+                fi.name as item_name, fi.description as item_description
+         FROM order_items oi
+         LEFT JOIN food_items fi ON oi.food_item_id = fi.id
+         WHERE oi.order_id IN (${placeholders})
+         ORDER BY oi.created_at`,
+        deliveryIds
       );
-      
-      // Get food item names
-      for (const item of items) {
-        const foodItem = await findOne('food_items', { id: item.food_item_id }, 'name, description');
-        item.item_name = foodItem.name;
-        item.item_description = foodItem.description;
-      }
-      
-      delivery.items = items;
+
+      itemsByOrderId = allItems.reduce((acc, item) => {
+        if (!acc[item.order_id]) {
+          acc[item.order_id] = [];
+        }
+        acc[item.order_id].push(item);
+        return acc;
+      }, {});
+    }
+
+    for (const delivery of deliveries) {
+      delivery.items = itemsByOrderId[delivery.id] || [];
     }
     
     // Get total count
@@ -164,7 +175,7 @@ router.get('/:id', validateId, async (req, res) => {
 router.patch('/:id/status', validateId, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes, delivery_person } = req.body;
+    const { status, notes } = req.body;
     
     const validStatuses = ['pending', 'assigned', 'picked_up', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
@@ -206,10 +217,8 @@ router.patch('/:id/status', validateId, async (req, res) => {
     };
     
     if (notes) updateData.delivery_notes = notes;
-    if (delivery_person) updateData.delivery_person = delivery_person;
-    
     if (status === 'delivered') {
-      updateData.delivered_at = new Date();
+      updateData.delivery_notes = notes || 'Delivered';
     }
     
     await update('delivery_details', updateData, { order_id: id });
@@ -255,7 +264,7 @@ router.patch('/:id/status', validateId, async (req, res) => {
       'delivery_details',
       delivery.id,
       { delivery_status: oldStatus },
-      { delivery_status: status, notes, delivery_person },
+      { delivery_status: status, notes },
       req.ip,
       req.headers['user-agent']
     );
@@ -324,15 +333,8 @@ router.post('/:id/collect-payment', validateId, async (req, res) => {
     
     const payment = await insert('payments', paymentData);
     
-    // Update delivery details if fully paid
+    // Calculate whether the due amount has been fully covered
     const newTotalPaid = totalPaid + parseFloat(amount_collected);
-    if (newTotalPaid >= delivery.due_amount) {
-      await update('delivery_details', {
-        payment_collected: true,
-        payment_collected_at: new Date(),
-        updated_at: new Date()
-      }, { order_id: id });
-    }
     
     // Emit real-time update
     const io = req.app.get('io');
@@ -505,12 +507,12 @@ router.get('/stats/overview', async (req, res) => {
     const paymentStats = await query(`
       SELECT 
         COUNT(*) as total_deliveries,
-        SUM(CASE WHEN dd.payment_collected = 1 THEN 1 ELSE 0 END) as paid_deliveries,
+        SUM(CASE WHEN dd.due_amount <= 0 THEN 1 ELSE 0 END) as no_due_deliveries,
         SUM(o.total_amount) as total_order_value,
         SUM(dd.advance_payment) as total_advance_collected,
         SUM(dd.due_amount) as total_due_amount,
         ROUND(
-          (SUM(CASE WHEN dd.payment_collected = 1 THEN 1 ELSE 0 END) * 100.0) / 
+          (SUM(CASE WHEN dd.due_amount <= 0 THEN 1 ELSE 0 END) * 100.0) / 
           NULLIF(COUNT(*), 0), 
           2
         ) as payment_collection_rate
@@ -522,14 +524,15 @@ router.get('/stats/overview', async (req, res) => {
     // Get delivery time performance
     const timeStats = await query(`
       SELECT 
-        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as avg_delivery_time,
-        MIN(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as min_delivery_time,
-        MAX(TIMESTAMPDIFF(MINUTE, o.created_at, dd.delivered_at)) as max_delivery_time
+        AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as avg_delivery_time,
+        MIN(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as min_delivery_time,
+        MAX(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as max_delivery_time
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
+      LEFT JOIN delivery_tracking dt ON dt.delivery_detail_id = dd.id
       WHERE o.order_type = 'delivery' 
         AND dd.delivery_status = 'delivered'
-        AND dd.delivered_at IS NOT NULL
+        AND dt.actual_delivery_time IS NOT NULL
         ${dateFilter ? 'AND ' + dateFilter.substring(6) : ''}
     `, values);
     

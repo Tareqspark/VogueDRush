@@ -110,16 +110,15 @@ router.get('/:id', validateId, async (req, res) => {
     }
     
     // Get today's reservation for this table
-    const todayReservation = await findOne(
-      'reservations',
-      { 
-        table_id: id, 
-        reservation_date: new Date().toISOString().split('T')[0],
-        status: 'confirmed'
-      },
-      '*',
-      'reservation_time ASC'
+    const today = new Date().toISOString().split('T')[0];
+    const todayReservationRows = await query(
+      `SELECT * FROM reservations
+       WHERE table_id = ? AND reservation_date = ? AND status = 'confirmed'
+       ORDER BY reservation_time ASC
+       LIMIT 1`,
+      [id, today]
     );
+    const todayReservation = todayReservationRows[0] || null;
     
     table.today_reservation = todayReservation;
     
@@ -361,11 +360,7 @@ router.delete('/:id', requireAdmin, validateId, async (req, res) => {
       });
     }
     
-    // Soft delete by setting status to unavailable (or you could actually delete)
-    await update('tables', { 
-      status: 'maintenance', 
-      updated_at: new Date() 
-    }, { id });
+    await remove('tables', { id });
     
     // Log audit
     await logManualAudit(
@@ -374,7 +369,7 @@ router.delete('/:id', requireAdmin, validateId, async (req, res) => {
       'tables',
       parseInt(id),
       existingTable,
-      { status: 'maintenance', deleted_at: new Date() },
+      { deleted_at: new Date() },
       req.ip,
       req.headers['user-agent']
     );
@@ -436,12 +431,9 @@ router.get('/available/:date/:time', async (req, res) => {
       values.push(parseInt(party_size));
     }
     
-    const availableTables = await findMany(
-      'tables',
-      whereClause,
-      '*',
-      'location ASC, capacity ASC, table_number ASC',
-      values.join(' ')
+    const availableTables = await query(
+      `SELECT * FROM tables WHERE ${whereClause} ORDER BY location ASC, capacity ASC, table_number ASC`,
+      values
     );
     
     res.json({

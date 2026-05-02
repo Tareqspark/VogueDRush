@@ -8,12 +8,6 @@ const TableStatus = ({ stats }) => {
   const occupancy = stats?.todayOccupancy || {};
   const statusStats = stats?.statusStats || [];
 
-  const getOccupancyColor = (rate) => {
-    if (rate >= 80) return 'text-red-500';
-    if (rate >= 60) return 'text-yellow-500';
-    return 'text-green-500';
-  };
-
   const getStatusIcon = (status) => {
     const icons = {
       available: '🟢',

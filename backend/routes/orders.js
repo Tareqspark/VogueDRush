@@ -1,9 +1,9 @@
 const express = require('express');
-const { findOne, findMany, insert, update, remove, transaction } = require('../config/database');
+const { findOne, findMany, insert, update, remove, transaction, transactionWithIsolation } = require('../config/database');
 const { requireRole } = require('../middleware/auth');
+const { rateLimiters } = require('../middleware/rateLimiter');
 const { validateOrder, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
-const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
 
@@ -203,8 +203,8 @@ router.get('/:id', validateId, async (req, res) => {
   }
 });
 
-// Create new order
-router.post('/', validateOrder, async (req, res) => {
+// Create new order with proper race condition prevention
+router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => {
   try {
     const { 
       order_type, 
@@ -216,22 +216,46 @@ router.post('/', validateOrder, async (req, res) => {
       delivery_details 
     } = req.body;
     
-    // Validate table availability for dine-in
-    if (order_type === 'dine_in' && table_id) {
-      const table = await findOne('tables', { id: table_id });
-      if (!table) {
-        return res.status(400).json({ error: 'Table not found' });
+    // Use transaction with proper isolation level
+    const result = await transactionWithIsolation(async (connection) => {
+      // Validate table availability for dine-in with pessimistic locking
+      if (order_type === 'dine_in' && table_id) {
+        const [tableRows] = await connection.query(
+          'SELECT * FROM tables WHERE id = ? FOR UPDATE',
+          [table_id]
+        );
+        
+        const table = tableRows[0];
+        if (!table) {
+          throw new Error('Table not found');
+        }
+        if (table.status !== 'available') {
+          throw new Error('Table is not available');
+        }
+        
+        // Update table status to occupied
+        await connection.query(
+          'UPDATE tables SET status = ?, updated_at = NOW() WHERE id = ?',
+          ['occupied', table_id]
+        );
       }
-      if (table.status !== 'available') {
-        return res.status(400).json({ error: 'Table is not available' });
+      
+      // Check inventory for all items
+      for (const item of items) {
+        const [inventoryRows] = await connection.query(
+          'SELECT current_stock, min_stock_threshold FROM food_inventory WHERE food_item_id = ? FOR UPDATE',
+          [item.food_item_id]
+        );
+        
+        const inventory = inventoryRows[0];
+        if (inventory && inventory.current_stock < item.quantity) {
+          throw new Error(`Insufficient stock for item ${item.food_item_id}`);
+        }
       }
-    }
-    
-    // Calculate totals
-    const totals = await calculateOrderTotals(items, order_type);
-    
-    // Create order in transaction
-    const result = await transaction(async (connection) => {
+      
+      // Calculate totals
+      const totals = await calculateOrderTotals(items, order_type);
+      
       // Insert order
       const orderData = {
         order_number: generateOrderNumber(),
@@ -253,9 +277,14 @@ router.post('/', validateOrder, async (req, res) => {
       
       const orderId = orderResult.insertId;
       
-      // Insert order items
+      // Insert order items and update inventory
       for (const item of items) {
-        const foodItem = await findOne('food_items', { id: item.food_item_id });
+        const [foodItemRows] = await connection.query(
+          'SELECT * FROM food_items WHERE id = ?',
+          [item.food_item_id]
+        );
+        
+        const foodItem = foodItemRows[0];
         const unitPrice = foodItem.promotional_price || foodItem.price;
         const itemTotal = unitPrice * item.quantity;
         
@@ -275,11 +304,28 @@ router.post('/', validateOrder, async (req, res) => {
           Object.values(itemData)
         );
         
-        // Add to kitchen queue
+        // Update inventory
+        await connection.query(
+          'UPDATE food_inventory SET current_stock = current_stock - ?, last_updated = NOW() WHERE food_item_id = ?',
+          [item.quantity, item.food_item_id]
+        );
+        
+        // Add to kitchen queue with priority based on stock level
+        const [inventoryRows] = await connection.query(
+          'SELECT current_stock, min_stock_threshold FROM food_inventory WHERE food_item_id = ?',
+          [item.food_item_id]
+        );
+        
+        const inventory = inventoryRows[0];
+        let priority = 0; // normal priority
+        if (inventory && inventory.current_stock <= inventory.min_stock_threshold) {
+          priority = 1; // high priority for low stock items
+        }
+        
         const kitchenData = {
           order_id: orderId,
           order_item_id: itemResult.insertId,
-          priority: 0,
+          priority: priority,
           estimated_prep_time: foodItem.preparation_time || 15,
           status: 'queued'
         };
@@ -297,57 +343,79 @@ router.post('/', validateOrder, async (req, res) => {
           order_id: orderId,
           customer_address: delivery_details.customer_address || null,
           delivery_phone: delivery_details.delivery_phone || customer_phone || null,
-          advance_payment: delivery_details.advance_payment || 0,
-          due_amount: totals.total_amount - (delivery_details.advance_payment || 0),
+          advance_payment: delivery_details.advance_payment || 0.00,
+          due_amount: delivery_details.due_amount || 0.00,
           delivery_notes: delivery_details.delivery_notes || null
         };
         
-        await connection.query(
+        const [deliveryResult] = await connection.query(
           `INSERT INTO delivery_details (${Object.keys(deliveryData).join(', ')}) 
            VALUES (${Object.keys(deliveryData).map(() => '?').join(', ')})`,
           Object.values(deliveryData)
         );
-      }
-      
-      // Update table status if dine-in
-      if (order_type === 'dine_in' && table_id) {
+        
+        // Create delivery tracking record
+        const trackingData = {
+          delivery_detail_id: deliveryResult.insertId,
+          current_status: 'pending',
+          estimated_delivery_time: new Date(Date.now() + 45 * 60 * 1000) // 45 minutes from now
+        };
+        
         await connection.query(
-          'UPDATE tables SET status = ? WHERE id = ?',
-          ['occupied', table_id]
+          `INSERT INTO delivery_tracking (${Object.keys(trackingData).join(', ')}) 
+           VALUES (${Object.keys(trackingData).map(() => '?').join(', ')})`,
+          Object.values(trackingData)
         );
       }
       
       return orderId;
-    });
+    }, 'SERIALIZABLE'); // Use highest isolation level to prevent race conditions
     
-    // Get created order
-    const createdOrder = await findOne('orders', { id: result });
+    // Fetch the created order with all details
+    const order = await findOne('orders', { id: result });
     
-    // Emit real-time update
+    // Emit real-time events
     const io = req.app.get('io');
-    io.emit('new-order', { order: createdOrder });
-    io.to('kitchen').emit('kitchen-update', { action: 'new-order', orderId: result });
+    if (io) {
+      io.to('kitchen').emit('new-order', {
+        order_id: result,
+        order_type: order.order_type,
+        table_id: order.table_id,
+        items_count: items.length
+      });
+      
+      if (order.table_id) {
+        io.to('waiter').emit('table-occupied', {
+          table_id: order.table_id,
+          order_id: result
+        });
+      }
+    }
     
     // Log audit
     await logManualAudit(
       req.user.id,
-      'create',
+      'create_order',
       'orders',
       result,
       null,
-      { order_number: createdOrder.order_number, order_type, total_amount: createdOrder.total_amount },
+      { order_type, table_id, items_count: items.length },
       req.ip,
       req.headers['user-agent']
     );
     
     res.status(201).json({
       message: 'Order created successfully',
-      order: createdOrder
+      order_id: result,
+      order_number: order.order_number
     });
     
   } catch (error) {
     console.error('Create order error:', error);
-    res.status(500).json({ error: error.message || 'Failed to create order' });
+    res.status(400).json({ 
+      error: error.message || 'Failed to create order',
+      code: 'ORDER_CREATION_FAILED'
+    });
   }
 });
 
@@ -378,8 +446,7 @@ router.patch('/:id/status', validateId, async (req, res) => {
     // Update order status
     await update('orders', { 
       status, 
-      updated_at: new Date(),
-      ...(status === 'cancelled' && { cancellation_reason: reason })
+      updated_at: new Date()
     }, { id });
     
     // Update table status if order is done or cancelled

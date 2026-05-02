@@ -1,52 +1,117 @@
 const jwt = require('jsonwebtoken');
-const { findOne } = require('../config/database');
+const crypto = require('crypto');
+const { findOne, insert, update, remove, query } = require('../config/database');
 
-// JWT token generation
-const generateTokens = (payload) => {
-  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || '15m'
-  });
+// JWT token generation with JTI for blacklisting
+const generateTokens = async (payload, userDeviceInfo = null) => {
+  const jti = crypto.randomUUID(); // JWT ID for blacklisting
+  const refreshTokenJti = crypto.randomUUID();
   
-  const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
-  });
+  const accessToken = jwt.sign(
+    { ...payload, jti }, 
+    process.env.JWT_SECRET, 
+    { expiresIn: process.env.JWT_EXPIRE || '15m' }
+  );
   
-  return { accessToken, refreshToken };
+  const refreshToken = jwt.sign(
+    { ...payload, jti: refreshTokenJti }, 
+    process.env.JWT_REFRESH_SECRET, 
+    { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
+  );
+  
+  // Store session in database
+  const sessionToken = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
+  
+  try {
+    await insert('user_sessions', {
+      user_id: payload.id,
+      session_token: sessionToken,
+      refresh_token_jti: refreshTokenJti,
+      device_info: userDeviceInfo ? JSON.stringify(userDeviceInfo) : null,
+      ip_address: userDeviceInfo?.ipAddress || null,
+      user_agent: userDeviceInfo?.userAgent || null,
+      expires_at: expiresAt
+    });
+  } catch (error) {
+    console.error('Failed to store session:', error);
+  }
+  
+  return { 
+    accessToken, 
+    refreshToken, 
+    sessionToken,
+    accessTokenJti: jti,
+    refreshTokenJti: refreshTokenJti
+  };
 };
 
-// Verify access token middleware
+// Verify access token middleware with blacklist check
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
     
     if (!token) {
-      return res.status(401).json({ error: 'Access token required' });
+      return res.status(401).json({ 
+        error: 'Access token required',
+        code: 'TOKEN_REQUIRED'
+      });
     }
     
     jwt.verify(token, process.env.JWT_SECRET, async (err, user) => {
       if (err) {
         if (err.name === 'TokenExpiredError') {
-          return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+          return res.status(401).json({ 
+            error: 'Token expired', 
+            code: 'TOKEN_EXPIRED' 
+          });
         }
-        return res.status(403).json({ error: 'Invalid token' });
+        return res.status(403).json({ 
+          error: 'Invalid token',
+          code: 'TOKEN_INVALID'
+        });
+      }
+      
+      // Check if token is blacklisted
+      const blacklistedToken = await findOne('token_blacklist', { 
+        token_jti: user.jti, 
+        token_type: 'access'
+      });
+      
+      if (blacklistedToken) {
+        return res.status(403).json({ 
+          error: 'Token has been revoked',
+          code: 'TOKEN_REVOKED'
+        });
       }
       
       // Fetch fresh user data from database
-      const userData = await findOne('users', { id: user.id, is_active: true });
+      const userData = await findOne('users', { 
+        id: user.id, 
+        is_active: true 
+      });
+      
       if (!userData) {
-        return res.status(403).json({ error: 'User not found or inactive' });
+        return res.status(403).json({ 
+          error: 'User not found or inactive',
+          code: 'USER_INACTIVE'
+        });
       }
       
       // Remove sensitive data
       delete userData.password_hash;
       
       req.user = userData;
+      req.tokenJti = user.jti;
       next();
     });
   } catch (error) {
     console.error('Auth middleware error:', error);
-    res.status(500).json({ error: 'Authentication error' });
+    res.status(500).json({ 
+      error: 'Authentication error',
+      code: 'AUTH_ERROR'
+    });
   }
 };
 
@@ -75,44 +140,195 @@ const requireRole = (roles) => {
 // Admin-only middleware
 const requireAdmin = requireRole('admin');
 
-// Refresh access token
+// Refresh access token with rotation
 const refreshToken = async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    const { refreshToken, sessionToken } = req.body;
     
-    if (!refreshToken) {
-      return res.status(401).json({ error: 'Refresh token required' });
+    if (!refreshToken || !sessionToken) {
+      return res.status(401).json({ 
+        error: 'Refresh token and session token required',
+        code: 'TOKENS_REQUIRED'
+      });
     }
     
     jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, async (err, user) => {
       if (err) {
-        return res.status(403).json({ error: 'Invalid refresh token' });
+        return res.status(403).json({ 
+          error: 'Invalid refresh token',
+          code: 'REFRESH_TOKEN_INVALID'
+        });
+      }
+      
+      // Check if refresh token is blacklisted
+      const blacklistedToken = await findOne('token_blacklist', { 
+        token_jti: user.jti, 
+        token_type: 'refresh',
+        expires_at: { $gt: new Date() }
+      });
+      
+      if (blacklistedToken) {
+        return res.status(403).json({ 
+          error: 'Refresh token has been revoked',
+          code: 'REFRESH_TOKEN_REVOKED'
+        });
+      }
+      
+      // Verify session exists and is active
+      const session = await findOne('user_sessions', { 
+        session_token: sessionToken,
+        refresh_token_jti: user.jti,
+        is_active: true
+      });
+      
+      if (!session) {
+        return res.status(403).json({ 
+          error: 'Invalid or expired session',
+          code: 'SESSION_INVALID'
+        });
       }
       
       // Fetch fresh user data
-      const userData = await findOne('users', { id: user.id, is_active: true });
+      const userData = await findOne('users', { 
+        id: user.id, 
+        is_active: true 
+      });
+      
       if (!userData) {
-        return res.status(403).json({ error: 'User not found or inactive' });
+        return res.status(403).json({ 
+          error: 'User not found or inactive',
+          code: 'USER_INACTIVE'
+        });
       }
       
+      // Blacklist old refresh token
+      const oldTokenExpiry = new Date(user.exp * 1000);
+      await insert('token_blacklist', {
+        token_jti: user.jti,
+        token_type: 'refresh',
+        user_id: user.id,
+        expires_at: oldTokenExpiry
+      });
+      
       // Generate new tokens
-      const tokens = generateTokens({ 
+      const deviceInfo = {
+        ipAddress: session.ip_address,
+        userAgent: session.user_agent
+      };
+      
+      const tokens = await generateTokens({ 
         id: userData.id, 
         username: userData.username, 
         role: userData.role 
-      });
+      }, deviceInfo);
+      
+      // Deactivate the previous refresh session and keep only the rotated one active
+      await update('user_sessions', 
+        { is_active: false, last_activity: new Date() },
+        { session_token: sessionToken }
+      );
       
       // Remove sensitive data
       delete userData.password_hash;
       
+      // Set httpOnly cookies
+      res.cookie('accessToken', tokens.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000 // 15 minutes
+      });
+      
+      res.cookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+      
       res.json({
         user: userData,
-        ...tokens
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        sessionToken: tokens.sessionToken,
+        message: 'Tokens refreshed successfully'
       });
     });
   } catch (error) {
     console.error('Refresh token error:', error);
-    res.status(500).json({ error: 'Token refresh error' });
+    res.status(500).json({ 
+      error: 'Token refresh error',
+      code: 'REFRESH_ERROR'
+    });
+  }
+};
+
+// Logout and blacklist tokens
+const logout = async (req, res) => {
+  try {
+    const { userId, sessionToken } = req.body;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!userId || !sessionToken) {
+      return res.status(400).json({ 
+        error: 'User ID and session token required',
+        code: 'LOGOUT_PARAMS_REQUIRED'
+      });
+    }
+    
+    // Find and deactivate session
+    const session = await findOne('user_sessions', { 
+      user_id: userId,
+      session_token: sessionToken,
+      is_active: true
+    });
+    
+    if (session) {
+      // Blacklist refresh token
+      await insert('token_blacklist', {
+        token_jti: session.refresh_token_jti,
+        token_type: 'refresh',
+        user_id: userId,
+        expires_at: session.expires_at
+      });
+      
+      // Deactivate session
+      await update('user_sessions', 
+        { is_active: false },
+        { session_token: sessionToken }
+      );
+    }
+    
+    // Blacklist access token if provided
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (decoded.jti) {
+          await insert('token_blacklist', {
+            token_jti: decoded.jti,
+            token_type: 'access',
+            user_id: userId,
+            expires_at: new Date(decoded.exp * 1000)
+          });
+        }
+      } catch (error) {
+        // Token was invalid, but continue with logout
+        console.log('Invalid access token during logout:', error.message);
+      }
+    }
+    
+    // Clear cookies
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    
+    res.json({ message: 'Logout successful' });
+    
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ 
+      error: 'Logout failed',
+      code: 'LOGOUT_ERROR'
+    });
   }
 };
 
@@ -155,5 +371,6 @@ module.exports = {
   requireRole,
   requireAdmin,
   refreshToken,
+  logout,
   optionalAuth
 };

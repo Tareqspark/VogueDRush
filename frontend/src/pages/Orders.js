@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
 import {
-  PlusIcon, MagnifyingGlassIcon, FunnelIcon, XMarkIcon,
+  PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
@@ -156,8 +156,7 @@ export default function Orders() {
 // Order Detail Modal
 // ────────────────────────────────────────────────────────────────
 function OrderDetailModal({ detail, onClose, onUpdateStatus, userRole, userId }) {
-  const { order, items, payments } = detail;
-  const nextStatus = { pending: 'preparing', preparing: 'ready', ready: 'done' }[order.status];
+  const { order, items } = detail;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
@@ -342,8 +341,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
             <button onClick={() => setCategoryFilter('')}
               className={`px-3 py-1 text-xs font-bold rounded-full whitespace-nowrap transition-all ${!categoryFilter ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:text-sky-600'}`}>All</button>
             {categories.map(c => (
-              <button key={c.id} onClick={() => setCategoryFilter(c.id)}
-                className={`px-3 py-1 text-xs font-bold rounded-full whitespace-nowrap transition-all ${categoryFilter == c.id ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:text-sky-600'}`}>
+              <button key={c.id} onClick={() => setCategoryFilter(String(c.id))}
+                className={`px-3 py-1 text-xs font-bold rounded-full whitespace-nowrap transition-all ${categoryFilter === String(c.id) ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:text-sky-600'}`}>
                 {c.icon} {c.name}
               </button>
             ))}

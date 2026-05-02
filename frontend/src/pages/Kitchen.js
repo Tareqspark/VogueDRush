@@ -14,12 +14,6 @@ const STATUS_COLORS = {
   ready:     'border-l-emerald-500',
   cancelled: 'border-l-slate-300',
 };
-const STATUS_BADGES = {
-  queued:    'bg-amber-50 text-amber-700 border-amber-200',
-  preparing: 'bg-sky-50 text-sky-700 border-sky-200',
-  ready:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-};
-
 export default function Kitchen() {
   const { api } = useAuth();
   const { socket } = useSocket();

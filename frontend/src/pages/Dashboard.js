@@ -6,9 +6,6 @@ import {
   UsersIcon,
   FireIcon,
   TruckIcon,
-  CalendarIcon,
-  ArrowTrendingUpIcon,
-  ArrowTrendingDownIcon,
   RectangleGroupIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,11 +20,10 @@ import TodayReservations from '../components/Dashboard/TodayReservations';
 const Dashboard = () => {
   const { user, api } = useAuth();
   const { isConnected } = useSocket();
-  const [selectedPeriod, setSelectedPeriod] = useState('today');
+  const [selectedPeriod] = useState('today');
 
   // Fetch dashboard statistics
   const {
-    data: stats,
     isLoading: statsLoading,
     refetch: refetchStats,
   } = useQuery(
@@ -78,8 +74,25 @@ const Dashboard = () => {
   } = useQuery(
     'kitchen-stats',
     async () => {
-      const response = await api.get('/kitchen/stats/overview');
-      return response.data;
+      const response = await api.get('/kitchen', { params: { limit: 200 } });
+      const payload = response.data || {};
+      const stats = payload.stats || {};
+
+      return {
+        currentWorkload: {
+          queued_items: parseInt(stats.queued || 0, 10),
+          preparing_items: parseInt(stats.preparing || 0, 10),
+          ready_items: parseInt(stats.ready || 0, 10),
+          total_queued_time: parseFloat(stats.avg_completion_time || 0),
+        },
+        performanceStats: {
+          completion_rate: parseInt(stats.total_items || 0, 10) > 0
+            ? Math.round((parseInt(stats.ready || 0, 10) * 100) / parseInt(stats.total_items || 1, 10))
+            : 0,
+          efficiency_percentage: parseInt(stats.overdue || 0, 10) > 0 ? 70 : 90,
+          avg_prep_time: parseFloat(stats.avg_completion_time || 0),
+        }
+      };
     },
     {
       refetchInterval: 30000,

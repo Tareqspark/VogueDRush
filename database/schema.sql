@@ -1,9 +1,9 @@
--- Vogue Cafe D Rush - Restaurant Management System Database Schema
+-- FoodPark - Restaurant Management System Database Schema
 -- MySQL Database Schema
 
 -- Create database
-CREATE DATABASE IF NOT EXISTS vogue_cafe_drush CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE vogue_cafe_drush;
+CREATE DATABASE IF NOT EXISTS foodpark CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE foodpark;
 
 -- Users table for authentication and user management
 CREATE TABLE users (
@@ -111,10 +111,14 @@ CREATE TABLE order_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (food_item_id) REFERENCES food_items(id),
+    FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE RESTRICT,
     INDEX idx_order_id (order_id),
     INDEX idx_food_item_id (food_item_id),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_order_status (order_id, status),
+    CONSTRAINT chk_quantity CHECK (quantity > 0),
+    CONSTRAINT chk_unit_price CHECK (unit_price >= 0),
+    CONSTRAINT chk_total_price CHECK (total_price >= 0)
 );
 
 -- Payment records for orders
@@ -130,7 +134,10 @@ CREATE TABLE payments (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     INDEX idx_order_id (order_id),
     INDEX idx_payment_method (payment_method),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_transaction_id (transaction_id),
+    INDEX idx_order_payment (order_id, status),
+    CONSTRAINT chk_amount CHECK (amount >= 0)
 );
 
 -- Delivery details for delivery orders
@@ -147,7 +154,10 @@ CREATE TABLE delivery_details (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     INDEX idx_order_id (order_id),
-    INDEX idx_delivery_status (delivery_status)
+    INDEX idx_delivery_status (delivery_status),
+    INDEX idx_order_delivery (order_id, delivery_status),
+    CONSTRAINT chk_advance_payment CHECK (advance_payment >= 0),
+    CONSTRAINT chk_due_amount CHECK (due_amount >= 0)
 );
 
 -- Reservations and bookings
@@ -168,10 +178,15 @@ CREATE TABLE reservations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (table_id) REFERENCES tables(id) ON DELETE SET NULL,
     FOREIGN KEY (pre_order_id) REFERENCES orders(id) ON DELETE SET NULL,
-    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
     INDEX idx_reservation_date (reservation_date),
     INDEX idx_status (status),
-    INDEX idx_customer_phone (customer_phone)
+    INDEX idx_customer_phone (customer_phone),
+    INDEX idx_table_id (table_id),
+    INDEX idx_date_time (reservation_date, reservation_time),
+    INDEX idx_table_date (table_id, reservation_date),
+    CONSTRAINT chk_party_size CHECK (party_size > 0 AND party_size <= 20),
+    CONSTRAINT chk_reservation_time CHECK (reservation_time >= '10:00:00' AND reservation_time <= '23:00:00')
 );
 
 -- Kitchen queue for order preparation tracking
@@ -192,7 +207,12 @@ CREATE TABLE kitchen_queue (
     INDEX idx_order_id (order_id),
     INDEX idx_status (status),
     INDEX idx_priority (priority),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_order_priority (order_id, priority),
+    INDEX idx_status_priority (status, priority),
+    CONSTRAINT chk_priority CHECK (priority >= 0 AND priority <= 2),
+    CONSTRAINT chk_estimated_prep_time CHECK (estimated_prep_time > 0 AND estimated_prep_time <= 240),
+    CONSTRAINT chk_actual_prep_time CHECK (actual_prep_time IS NULL OR actual_prep_time > 0)
 );
 
 -- System settings for configuration
@@ -239,17 +259,19 @@ CREATE TABLE order_modifications (
     price_change DECIMAL(10,2) DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (modified_by) REFERENCES users(id),
+    FOREIGN KEY (modified_by) REFERENCES users(id) ON DELETE RESTRICT,
     INDEX idx_order_id (order_id),
     INDEX idx_modified_by (modified_by),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_order_date (order_id, created_at),
+    INDEX idx_modification_type (modification_type)
 );
 
 -- Insert default system settings
 INSERT INTO system_settings (setting_key, setting_value, description, data_type) VALUES
 ('vat_percentage', '15.00', 'VAT percentage for orders', 'number'),
 ('service_charge_percentage', '10.00', 'Service charge percentage for dine-in orders', 'number'),
-('restaurant_name', 'Vogue Cafe D Rush', 'Restaurant name for receipts and displays', 'string'),
+('restaurant_name', 'FoodPark', 'Restaurant name for receipts and displays', 'string'),
 ('restaurant_address', '123 Fashion Street, Dhaka', 'Restaurant address', 'string'),
 ('restaurant_phone', '+8801234567890', 'Restaurant contact phone', 'string'),
 ('currency_symbol', '৳', 'Currency symbol for display', 'string'),
@@ -260,7 +282,7 @@ INSERT INTO system_settings (setting_key, setting_value, description, data_type)
 
 -- Insert default admin user (password: admin123)
 INSERT INTO users (username, email, password_hash, full_name, role) VALUES
-('admin', 'admin@voguecafe.com', '$2b$10$rQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY', 'System Administrator', 'admin');
+('admin', 'admin@foodpark.com', '$2b$10$rQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY', 'System Administrator', 'admin');
 
 -- Insert default food categories
 INSERT INTO food_categories (name, description, icon, display_order) VALUES
@@ -281,3 +303,72 @@ INSERT INTO tables (table_number, capacity, location) VALUES
 ('T6', 8, 'First Floor'),
 ('T7', 2, 'Outdoor'),
 ('T8', 4, 'Outdoor');
+
+-- Token blacklist for logout functionality
+CREATE TABLE token_blacklist (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token_jti VARCHAR(255) UNIQUE NOT NULL, -- JWT ID
+    token_type ENUM('access', 'refresh') NOT NULL,
+    user_id INT NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_token_jti (token_jti),
+    INDEX idx_user_id (user_id),
+    INDEX idx_expires_at (expires_at)
+);
+
+-- User sessions for concurrent session management
+CREATE TABLE user_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    session_token VARCHAR(255) UNIQUE NOT NULL,
+    refresh_token_jti VARCHAR(255) UNIQUE NOT NULL,
+    device_info JSON,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_session_token (session_token),
+    INDEX idx_refresh_token_jti (refresh_token_jti),
+    INDEX idx_expires_at (expires_at),
+    INDEX idx_last_activity (last_activity)
+);
+
+-- Inventory management for food items
+CREATE TABLE food_inventory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    food_item_id INT NOT NULL,
+    current_stock INT NOT NULL DEFAULT 0,
+    min_stock_threshold INT NOT NULL DEFAULT 10,
+    unit VARCHAR(20) DEFAULT 'pieces',
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE,
+    INDEX idx_food_item_id (food_item_id),
+    INDEX idx_low_stock (current_stock, min_stock_threshold)
+);
+
+-- Delivery tracking
+CREATE TABLE delivery_tracking (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    delivery_detail_id INT NOT NULL,
+    driver_id INT NULL,
+    driver_name VARCHAR(100),
+    driver_phone VARCHAR(20),
+    current_status ENUM('assigned', 'picked_up', 'in_transit', 'delivered', 'cancelled') DEFAULT 'assigned',
+    current_location JSON,
+    estimated_delivery_time TIMESTAMP NULL,
+    actual_delivery_time TIMESTAMP NULL,
+    tracking_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (delivery_detail_id) REFERENCES delivery_details(id) ON DELETE CASCADE,
+    INDEX idx_delivery_detail_id (delivery_detail_id),
+    INDEX idx_driver_id (driver_id),
+    INDEX idx_current_status (current_status),
+    INDEX idx_estimated_delivery (estimated_delivery_time)
+);

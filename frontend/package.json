@@ -1,7 +1,7 @@
 {
-  "name": "vogue-cafe-frontend",
+  "name": "foodpark-frontend",
   "version": "1.0.0",
-  "description": "Vogue Cafe D Rush - Restaurant Management System Frontend",
+  "description": "FoodPark - Restaurant Management System Frontend",
   "private": true,
   "dependencies": {
     "@headlessui/react": "^1.7.17",

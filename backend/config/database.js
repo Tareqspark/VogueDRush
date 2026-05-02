@@ -7,7 +7,7 @@ const poolConfig = {
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'vogue_cafe_drush',
+  database: process.env.DB_NAME || 'foodpark',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -44,7 +44,7 @@ const query = async (sql, params = []) => {
   }
 };
 
-// Execute transaction
+// Execute transaction with proper error handling
 const transaction = async (callback) => {
   const connection = await pool.getConnection();
   try {
@@ -60,24 +60,130 @@ const transaction = async (callback) => {
   }
 };
 
-// Get single record
-const findOne = async (table, conditions = {}, select = '*') => {
-  const whereClause = Object.keys(conditions).map(key => `${key} = ?`).join(' AND ');
-  const values = Object.values(conditions);
-  const sql = `SELECT ${select} FROM ${table} WHERE ${whereClause} LIMIT 1`;
+// Execute transaction with isolation level
+const transactionWithIsolation = async (callback, isolationLevel = 'READ_COMMITTED') => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query(`SET TRANSACTION ISOLATION LEVEL ${isolationLevel}`);
+    const result = await callback(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+const buildWhereClause = (conditions = {}) => {
+  const clauses = [];
+  const values = [];
+
+  Object.entries(conditions).forEach(([key, value]) => {
+    if (value === null) {
+      clauses.push(`${key} IS NULL`);
+      return;
+    }
+
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      Object.entries(value).forEach(([operator, operand]) => {
+        switch (operator) {
+          case '$ne':
+            clauses.push(`${key} != ?`);
+            values.push(operand);
+            break;
+          case '$gt':
+            clauses.push(`${key} > ?`);
+            values.push(operand);
+            break;
+          case '$gte':
+            clauses.push(`${key} >= ?`);
+            values.push(operand);
+            break;
+          case '$lt':
+            clauses.push(`${key} < ?`);
+            values.push(operand);
+            break;
+          case '$lte':
+            clauses.push(`${key} <= ?`);
+            values.push(operand);
+            break;
+          case '$like':
+            clauses.push(`${key} LIKE ?`);
+            values.push(operand);
+            break;
+          case '$in':
+            if (Array.isArray(operand) && operand.length > 0) {
+              clauses.push(`${key} IN (${operand.map(() => '?').join(', ')})`);
+              values.push(...operand);
+            }
+            break;
+          default:
+            clauses.push(`${key} = ?`);
+            values.push(operand);
+        }
+      });
+      return;
+    }
+
+    clauses.push(`${key} = ?`);
+    values.push(value);
+  });
+
+  return {
+    whereClause: clauses.length > 0 ? clauses.join(' AND ') : '1=1',
+    values
+  };
+};
+
+// Get single record with optional lock
+const findOne = async (table, conditions = {}, select = '*', lock = null) => {
+  let selectClause = '*';
+  let whereClause = '1=1';
+  let values = [];
+
+  if (typeof conditions === 'string') {
+    whereClause = conditions;
+    if (Array.isArray(select)) {
+      values = select;
+    } else {
+      selectClause = select || '*';
+    }
+  } else {
+    const built = buildWhereClause(conditions);
+    whereClause = built.whereClause;
+    values = built.values;
+    selectClause = typeof select === 'string' ? select : '*';
+  }
+
+  let sql = `SELECT ${selectClause} FROM ${table} WHERE ${whereClause} LIMIT 1`;
+
+  if (lock && typeof lock === 'string') {
+    sql += ` FOR ${lock}`;
+  }
+
   const rows = await query(sql, values);
   return rows[0] || null;
 };
 
-// Get multiple records
-const findMany = async (table, conditions = {}, select = '*', orderBy = '', limit = '') => {
+// Get multiple records with advanced filtering
+const findMany = async (table, conditions = {}, select = '*', orderBy = '', limit = '', join = null) => {
   let sql = `SELECT ${select} FROM ${table}`;
-  const values = [];
+  let values = [];
   
-  if (Object.keys(conditions).length > 0) {
-    const whereClause = Object.keys(conditions).map(key => `${key} = ?`).join(' AND ');
-    sql += ` WHERE ${whereClause}`;
-    values.push(...Object.values(conditions));
+  // Add joins if specified
+  if (join) {
+    sql += ` ${join}`;
+  }
+
+  if (typeof conditions === 'string') {
+    sql += ` WHERE ${conditions}`;
+  } else if (Object.keys(conditions).length > 0) {
+    const built = buildWhereClause(conditions);
+    sql += ` WHERE ${built.whereClause}`;
+    values = built.values;
   }
   
   if (orderBy) {
@@ -130,6 +236,7 @@ module.exports = {
   pool,
   query,
   transaction,
+  transactionWithIsolation,
   findOne,
   findMany,
   insert,

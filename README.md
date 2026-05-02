@@ -1,4 +1,4 @@
-# Vogue Cafe D Rush - Restaurant Management System
+# FoodPark - Restaurant Management System
 
 A comprehensive restaurant management system built with modern web technologies, featuring real-time updates, role-based access control, and a beautiful dark theme with orange/lemon accents.
 
@@ -54,7 +54,7 @@ A comprehensive restaurant management system built with modern web technologies,
 ### 1. Clone the Repository
 ```bash
 git clone <repository-url>
-cd VogueDRush
+cd foodpark
 ```
 
 ### 2. Database Setup
@@ -74,7 +74,7 @@ cp .env.example .env
 # Edit .env with your database credentials
 # DB_HOST=localhost
 # DB_PORT=3306
-# DB_NAME=vogue_cafe_drush
+# DB_NAME=foodpark
 # DB_USER=root
 # DB_PASSWORD=your_password
 
@@ -109,7 +109,7 @@ npm start
 ## 📁 Project Structure
 
 ```
-VogueDRush/
+foodpark/
 ├── backend/
 │   ├── config/
 │   │   └── database.js          # Database configuration
@@ -171,7 +171,7 @@ Create a `.env` file in the backend directory:
 # Database Configuration
 DB_HOST=localhost
 DB_PORT=3306
-DB_NAME=vogue_cafe_drush
+DB_NAME=foodpark
 DB_USER=root
 DB_PASSWORD=
 
@@ -342,6 +342,6 @@ For support and questions:
 
 ---
 
-**Vogue Cafe D Rush** - Modern Restaurant Management System
+**FoodPark** - Modern Restaurant Management System
 Built with ❤️ using React, Node.js, and MySQL
-# VogueDRush
+# FoodPark

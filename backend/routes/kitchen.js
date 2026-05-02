@@ -1,12 +1,12 @@
 const express = require('express');
-const { findOne, findMany, insert, update, remove } = require('../config/database');
+const { findOne, findMany, insert, update, remove, query } = require('../config/database');
 const { requireRole } = require('../middleware/auth');
 const { validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
-// Get kitchen queue with filtering and sorting
+// Get kitchen queue with advanced filtering and priority sorting
 router.get('/', async (req, res) => {
   try {
     const { 
@@ -14,7 +14,9 @@ router.get('/', async (req, res) => {
       priority, 
       order_id,
       page = 1, 
-      limit = 100 
+      limit = 100,
+      sort_by = 'priority_created',
+      filter_overdue = 'false'
     } = req.query;
     
     const limitInt = parseInt(limit) || 50;
@@ -37,59 +39,112 @@ router.get('/', async (req, res) => {
       values.push(order_id);
     }
     
-    const { query } = require('../config/database');
+    // Filter overdue items (items taking longer than estimated prep time)
+    if (filter_overdue === 'true') {
+      whereClause += ' AND (kq.status = "preparing" AND TIMESTAMPDIFF(MINUTE, kq.started_at, NOW()) > kq.estimated_prep_time)';
+    }
     
-    // Get kitchen queue with order and item details
+    // Dynamic sorting based on priority and creation time
+    let orderByClause;
+    switch (sort_by) {
+      case 'priority_created':
+        orderByClause = 'kq.priority DESC, kq.created_at ASC';
+        break;
+      case 'prep_time':
+        orderByClause = 'kq.estimated_prep_time ASC, kq.priority DESC';
+        break;
+      case 'time_in_queue':
+        orderByClause = 'TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) DESC, kq.priority DESC';
+        break;
+      case 'order_type':
+        orderByClause = 'o.order_type ASC, kq.priority DESC';
+        break;
+      default:
+        orderByClause = 'kq.priority DESC, kq.created_at ASC';
+    }
+    
+    // Get kitchen queue with comprehensive details
     const queueQuery = `
       SELECT kq.*, o.order_number, o.order_type, o.table_id, o.customer_name,
              oi.quantity, oi.unit_price, oi.total_price, oi.special_instructions,
              fi.name as item_name, fi.description as item_description,
-             fi.preparation_time as standard_prep_time,
+             fi.preparation_time as standard_prep_time, fi.image_url,
              t.table_number, t.location as table_location,
              u.username as waiter_name, u.full_name as waiter_full_name,
-             TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) as time_in_queue
+             TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) as time_in_queue,
+             CASE 
+               WHEN kq.status = 'preparing' AND kq.started_at IS NOT NULL 
+               THEN TIMESTAMPDIFF(MINUTE, kq.started_at, NOW())
+               ELSE NULL
+             END as prep_time_elapsed,
+             CASE 
+               WHEN kq.status = 'preparing' AND kq.started_at IS NOT NULL 
+               AND TIMESTAMPDIFF(MINUTE, kq.started_at, NOW()) > kq.estimated_prep_time
+               THEN true
+               ELSE false
+             END as is_overdue,
+             inv.current_stock, inv.min_stock_threshold,
+             CASE 
+               WHEN inv.current_stock <= inv.min_stock_threshold THEN true
+               ELSE false
+             END as low_stock_warning
       FROM kitchen_queue kq
-      JOIN orders o ON kq.order_id = o.id
-      JOIN order_items oi ON kq.order_item_id = oi.id
-      JOIN food_items fi ON oi.food_item_id = fi.id
+      LEFT JOIN orders o ON kq.order_id = o.id
+      LEFT JOIN order_items oi ON kq.order_item_id = oi.id
+      LEFT JOIN food_items fi ON oi.food_item_id = fi.id
       LEFT JOIN tables t ON o.table_id = t.id
       LEFT JOIN users u ON o.waiter_id = u.id
+      LEFT JOIN food_inventory inv ON fi.id = inv.food_item_id
       WHERE ${whereClause}
-      ORDER BY kq.priority DESC, kq.created_at ASC
-      LIMIT ? OFFSET ?
+      ORDER BY ${orderByClause}
+      LIMIT ${limitInt} OFFSET ${offsetInt}
     `;
     
-    const queueItems = await query(queueQuery, [...values, limitInt, offsetInt]);
+    const queueItems = await query(queueQuery, values);
     
-    // Get total count
-    const countQuery = `SELECT COUNT(*) as total FROM kitchen_queue kq WHERE ${whereClause}`;
-    const countResult = await query(countQuery, values);
-    const total = countResult[0].total;
+    // Get queue statistics
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as total_items,
+        SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN status = 'preparing' THEN 1 ELSE 0 END) as preparing,
+        SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) as ready,
+        SUM(CASE WHEN priority = 2 THEN 1 ELSE 0 END) as urgent,
+        SUM(CASE WHEN priority = 1 THEN 1 ELSE 0 END) as high_priority_count,
+        SUM(CASE WHEN is_overdue = true THEN 1 ELSE 0 END) as overdue,
+        AVG(TIMESTAMPDIFF(MINUTE, created_at, COALESCE(completed_at, NOW()))) as avg_completion_time
+      FROM (
+        SELECT kq.*, 
+               CASE 
+                 WHEN kq.status = 'preparing' AND kq.started_at IS NOT NULL 
+                 AND TIMESTAMPDIFF(MINUTE, kq.started_at, NOW()) > kq.estimated_prep_time
+                 THEN true
+                 ELSE false
+               END as is_overdue
+        FROM kitchen_queue kq
+        LEFT JOIN orders o ON kq.order_id = o.id
+        WHERE ${whereClause}
+      ) as filtered_queue
+    `;
     
-    // Calculate estimated completion times
-    for (const item of queueItems) {
-      if (item.status === 'preparing' && item.started_at) {
-        item.elapsed_prep_time = Math.floor((new Date() - new Date(item.started_at)) / 60000); // in minutes
-        item.remaining_prep_time = Math.max(0, item.estimated_prep_time - item.elapsed_prep_time);
-      } else {
-        item.elapsed_prep_time = 0;
-        item.remaining_prep_time = item.estimated_prep_time;
-      }
-    }
+    const stats = await query(statsQuery, values);
     
     res.json({
       queue: queueItems,
+      stats: stats[0],
       pagination: {
         page: parseInt(page),
         limit: limitInt,
-        total,
-        pages: Math.ceil(total / limitInt)
+        total: stats[0].total_items
       }
     });
     
   } catch (error) {
     console.error('Get kitchen queue error:', error);
-    res.status(500).json({ error: 'Failed to fetch kitchen queue' });
+    res.status(500).json({ 
+      error: 'Failed to fetch kitchen queue',
+      code: 'KITCHEN_QUEUE_ERROR'
+    });
   }
 });
 
@@ -98,55 +153,11 @@ router.get('/:id', validateId, async (req, res) => {
   try {
     const { id } = req.params;
     
-    const { query } = require('../config/database');
-    
-    const itemQuery = `
-      SELECT kq.*, o.order_number, o.order_type, o.table_id, o.customer_name, o.special_instructions as order_special_instructions,
-             oi.quantity, oi.unit_price, oi.total_price, oi.special_instructions as item_special_instructions,
-             fi.name as item_name, fi.description as item_description, fi.image_url,
-             fi.preparation_time as standard_prep_time, fi.vat_rate,
-             t.table_number, t.location as table_location,
-             u.username as waiter_name, u.full_name as waiter_full_name,
-             TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) as time_in_queue
-      FROM kitchen_queue kq
-      JOIN orders o ON kq.order_id = o.id
-      JOIN order_items oi ON kq.order_item_id = oi.id
-      JOIN food_items fi ON oi.food_item_id = fi.id
-      LEFT JOIN tables t ON o.table_id = t.id
-      LEFT JOIN users u ON o.waiter_id = u.id
-      WHERE kq.id = ?
-    `;
-    
-    const itemResult = await query(itemQuery, [id]);
-    const item = itemResult[0];
+    const item = await findOne('kitchen_queue', { id });
     
     if (!item) {
       return res.status(404).json({ error: 'Kitchen queue item not found' });
     }
-    
-    // Calculate timing information
-    if (item.status === 'preparing' && item.started_at) {
-      item.elapsed_prep_time = Math.floor((new Date() - new Date(item.started_at)) / 60000);
-      item.remaining_prep_time = Math.max(0, item.estimated_prep_time - item.elapsed_prep_time);
-    } else {
-      item.elapsed_prep_time = 0;
-      item.remaining_prep_time = item.estimated_prep_time;
-    }
-    
-    // Get other items from the same order
-    const orderItemsQuery = `
-      SELECT kq.id, kq.status, kq.priority, kq.estimated_prep_time,
-             fi.name as item_name, oi.quantity,
-             TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) as time_in_queue
-      FROM kitchen_queue kq
-      JOIN order_items oi ON kq.order_item_id = oi.id
-      JOIN food_items fi ON oi.food_item_id = fi.id
-      WHERE kq.order_id = ? AND kq.id != ?
-      ORDER BY kq.priority DESC, kq.created_at ASC
-    `;
-    
-    const orderItems = await query(orderItemsQuery, [item.order_id, id]);
-    item.order_items = orderItems;
     
     res.json(item);
     
@@ -185,7 +196,6 @@ router.patch('/:id/start', validateId, async (req, res) => {
     }, { id: queueItem.order_item_id });
     
     // Check if order status should be updated to preparing
-    const { query } = require('../config/database');
     const orderItemsResult = await query(
       'SELECT COUNT(*) as pending_count FROM order_items WHERE order_id = ? AND status = "pending"',
       [queueItem.order_id]
@@ -276,7 +286,6 @@ router.patch('/:id/ready', validateId, async (req, res) => {
     }, { id: queueItem.order_item_id });
     
     // Check if all items in order are ready
-    const { query } = require('../config/database');
     const orderItemsResult = await query(
       'SELECT COUNT(*) as not_ready_count FROM order_items WHERE order_id = ? AND status IN ("pending", "preparing")',
       [queueItem.order_id]
@@ -376,7 +385,6 @@ router.patch('/:id/cancel', validateId, async (req, res) => {
     }, { id: queueItem.order_item_id });
     
     // Check if all items in order are cancelled
-    const { query } = require('../config/database');
     const orderItemsResult = await query(
       'SELECT COUNT(*) as active_count FROM order_items WHERE order_id = ? AND status NOT IN ("cancelled", "ready")',
       [queueItem.order_id]
@@ -385,8 +393,7 @@ router.patch('/:id/cancel', validateId, async (req, res) => {
     if (orderItemsResult[0].active_count === 0) {
       await update('orders', {
         status: 'cancelled',
-        updated_at: new Date(),
-        cancellation_reason: reason || 'Item cancelled from kitchen'
+        updated_at: new Date()
       }, { id: queueItem.order_id });
       
       // Free up table if dine-in
@@ -490,185 +497,6 @@ router.patch('/:id/priority', validateId, async (req, res) => {
   } catch (error) {
     console.error('Update priority error:', error);
     res.status(500).json({ error: 'Failed to update priority' });
-  }
-});
-
-// Get kitchen statistics
-router.get('/stats/overview', async (req, res) => {
-  try {
-    const { start_date, end_date } = req.query;
-    
-    const { query } = require('../config/database');
-    
-    let dateFilter = '';
-    let values = [];
-    
-    if (start_date && end_date) {
-      dateFilter = 'WHERE DATE(kq.created_at) BETWEEN ? AND ?';
-      values = [start_date, end_date];
-    }
-    
-    // Get queue status counts
-    const statusStats = await query(`
-      SELECT status, COUNT(*) as count,
-             AVG(estimated_prep_time) as avg_estimated_time,
-             AVG(actual_prep_time) as avg_actual_time
-      FROM kitchen_queue 
-      ${dateFilter}
-      GROUP BY status
-    `, values);
-    
-    // Get priority distribution
-    const priorityStats = await query(`
-      SELECT priority, COUNT(*) as count,
-             CASE priority
-               WHEN 0 THEN 'Normal'
-               WHEN 1 THEN 'High'
-               WHEN 2 THEN 'Urgent'
-             END as priority_name
-      FROM kitchen_queue 
-      ${dateFilter}
-      GROUP BY priority
-      ORDER BY priority DESC
-    `, values);
-    
-    // Get performance metrics
-    const performanceStats = await query(`
-      SELECT 
-        COUNT(*) as total_items,
-        SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) as completed_items,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_items,
-        ROUND(
-          (SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) * 100.0) / 
-          NULLIF(COUNT(*), 0), 
-          2
-        ) as completion_rate,
-        AVG(CASE WHEN actual_prep_time IS NOT NULL THEN actual_prep_time ELSE NULL END) as avg_prep_time,
-        AVG(CASE WHEN estimated_prep_time > 0 AND actual_prep_time IS NOT NULL 
-                  THEN (actual_prep_time / estimated_prep_time) * 100 
-                  ELSE NULL END) as efficiency_percentage
-      FROM kitchen_queue 
-      ${dateFilter}
-    `, values);
-    
-    // Get item performance (most prepared items)
-    const itemStats = await query(`
-      SELECT fi.name, COUNT(*) as preparation_count,
-             AVG(kq.actual_prep_time) as avg_prep_time,
-             AVG(kq.estimated_prep_time) as avg_estimated_time
-      FROM kitchen_queue kq
-      JOIN order_items oi ON kq.order_item_id = oi.id
-      JOIN food_items fi ON oi.food_item_id = fi.id
-      ${dateFilter.replace('kq.', '')}
-      GROUP BY fi.id, fi.name
-      HAVING preparation_count > 0
-      ORDER BY preparation_count DESC
-      LIMIT 10
-    `, values);
-    
-    // Get current workload
-    const currentWorkload = await query(`
-      SELECT 
-        COUNT(*) as total_queued,
-        SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued_items,
-        SUM(CASE WHEN status = 'preparing' THEN 1 ELSE 0 END) as preparing_items,
-        SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) as ready_items,
-        SUM(CASE WHEN status = 'queued' THEN estimated_prep_time ELSE 0 END) as total_queued_time
-      FROM kitchen_queue 
-      WHERE status IN ('queued', 'preparing', 'ready')
-    `);
-    
-    res.json({
-      statusStats,
-      priorityStats,
-      performanceStats: performanceStats[0],
-      itemStats,
-      currentWorkload: currentWorkload[0]
-    });
-    
-  } catch (error) {
-    console.error('Get kitchen stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch kitchen statistics' });
-  }
-});
-
-// Get kitchen display board data (optimized for kitchen display)
-router.get('/display/board', async (req, res) => {
-  try {
-    const { status_filter = 'active' } = req.query; // active, all, ready
-    
-    let statusCondition = '';
-    if (status_filter === 'active') {
-      statusCondition = 'AND kq.status IN ("queued", "preparing")';
-    } else if (status_filter === 'ready') {
-      statusCondition = 'AND kq.status = "ready"';
-    }
-    
-    const { query } = require('../config/database');
-    
-    const boardQuery = `
-      SELECT kq.id, kq.status, kq.priority, kq.estimated_prep_time,
-             kq.started_at, kq.completed_at,
-             TIMESTAMPDIFF(MINUTE, kq.created_at, NOW()) as time_in_queue,
-             o.order_number, o.order_type, o.created_at as order_time,
-             oi.quantity, oi.special_instructions,
-             fi.name as item_name,
-             t.table_number,
-             u.username as waiter_name,
-             CASE 
-               WHEN kq.status = 'preparing' AND kq.started_at IS NOT NULL 
-               THEN TIMESTAMPDIFF(MINUTE, kq.started_at, NOW())
-               ELSE 0 
-             END as elapsed_time
-      FROM kitchen_queue kq
-      JOIN orders o ON kq.order_id = o.id
-      JOIN order_items oi ON kq.order_item_id = oi.id
-      JOIN food_items fi ON oi.food_item_id = fi.id
-      LEFT JOIN tables t ON o.table_id = t.id
-      LEFT JOIN users u ON o.waiter_id = u.id
-      WHERE 1=1 ${statusCondition}
-      ORDER BY kq.priority DESC, kq.created_at ASC
-    `;
-    
-    const boardItems = await query(boardQuery);
-    
-    // Group by order for better display
-    const groupedOrders = {};
-    boardItems.forEach(item => {
-      if (!groupedOrders[item.order_number]) {
-        groupedOrders[item.order_number] = {
-          order_number: item.order_number,
-          order_type: item.order_type,
-          table_number: item.table_number,
-          waiter_name: item.waiter_name,
-          order_time: item.order_time,
-          items: [],
-          status_summary: {
-            queued: 0,
-            preparing: 0,
-            ready: 0
-          }
-        };
-      }
-      
-      groupedOrders[item.order_number].items.push(item);
-      groupedOrders[item.order_number].status_summary[item.status]++;
-    });
-    
-    res.json({
-      display_data: Object.values(groupedOrders),
-      summary: {
-        total_orders: Object.keys(groupedOrders).length,
-        total_items: boardItems.length,
-        queued_items: boardItems.filter(item => item.status === 'queued').length,
-        preparing_items: boardItems.filter(item => item.status === 'preparing').length,
-        ready_items: boardItems.filter(item => item.status === 'ready').length
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get kitchen display error:', error);
-    res.status(500).json({ error: 'Failed to fetch kitchen display data' });
   }
 });
 

@@ -18,19 +18,6 @@ const KitchenStatus = ({ stats }) => {
     return `${hours}h ${mins}m`;
   };
 
-  const getQueueColor = (count) => {
-    if (count === 0) return 'text-green-500';
-    if (count <= 5) return 'text-yellow-500';
-    return 'text-red-500';
-  };
-
-  const getEfficiencyColor = (efficiency) => {
-    if (!efficiency) return 'text-gray-500';
-    if (efficiency >= 90) return 'text-green-500';
-    if (efficiency >= 70) return 'text-yellow-500';
-    return 'text-red-500';
-  };
-
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between mb-4">

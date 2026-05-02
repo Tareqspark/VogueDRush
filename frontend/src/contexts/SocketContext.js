@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
@@ -8,32 +8,81 @@ const SocketContext = createContext();
 
 // Socket provider component
 export const SocketProvider = ({ children }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, accessToken } = useAuth();
   const socketRef = useRef(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const reconnectTimeoutRef = useRef(null);
+  const maxReconnectAttempts = 5;
+  const reconnectDelay = 1000; // Start with 1 second
+  const maxReconnectDelay = 30000; // Max 30 seconds
+
+  const clearReconnectTimeout = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  }, []);
+
+  const attemptReconnect = useCallback(() => {
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      setConnectionStatus('failed');
+      toast.error('Connection failed. Please refresh the page.', {
+        duration: 10000,
+      });
+      return;
+    }
+
+    const delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+    
+    setConnectionStatus('reconnecting');
+    
+    reconnectTimeoutRef.current = setTimeout(() => {
+      setReconnectAttempts(prev => prev + 1);
+      if (socketRef.current) {
+        socketRef.current.connect();
+      }
+    }, delay);
+  }, [reconnectAttempts, reconnectDelay, maxReconnectDelay, maxReconnectAttempts]);
 
   useEffect(() => {
-    if (!isAuthenticated || !user) {
+    if (!isAuthenticated || !user || !accessToken) {
       // Disconnect socket if user is not authenticated
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      setIsConnected(false);
+      setConnectionStatus('disconnected');
+      setReconnectAttempts(0);
+      clearReconnectTimeout();
       return;
     }
 
-    // Initialize socket connection
+    // Initialize socket connection with enhanced configuration
     const socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000', {
       auth: {
-        token: localStorage.getItem('accessToken'),
+        token: accessToken,
       },
       transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true,
+      timeout: 20000,
+      forceNew: true,
+      reconnection: false, // We'll handle reconnection manually
+      autoConnect: true,
     });
 
     socketRef.current = socket;
 
-    // Connection events
+    // Connection events with enhanced handling
     socket.on('connect', () => {
       console.log('Connected to server');
+      setIsConnected(true);
+      setConnectionStatus('connected');
+      setReconnectAttempts(0);
+      clearReconnectTimeout();
       
       // Join role-based room
       socket.emit('join-role', user.role);
@@ -42,14 +91,64 @@ export const SocketProvider = ({ children }) => {
       if (user.role === 'waiter' || user.role === 'admin') {
         socket.emit('join-kitchen');
       }
+      
+      // Show success toast if reconnecting
+      if (reconnectAttempts > 0) {
+        toast.success('Reconnected to server', {
+          duration: 3000,
+        });
+      }
     });
 
-    socket.on('disconnect', () => {
-      console.log('Disconnected from server');
+    socket.on('disconnect', (reason) => {
+      console.log('Disconnected from server:', reason);
+      setIsConnected(false);
+      setConnectionStatus('disconnected');
+      
+      // Don't show toast for intentional disconnections
+      if (reason !== 'io client disconnect') {
+        toast.error('Disconnected from server', {
+          duration: 5000,
+        });
+        
+        // Attempt to reconnect
+        if (reconnectAttempts < maxReconnectAttempts) {
+          attemptReconnect();
+        }
+      }
     });
 
     socket.on('connect_error', (error) => {
       console.error('Connection error:', error);
+      setConnectionStatus('error');
+      
+      // Handle different error types
+      if (error.message === 'Authentication token required') {
+        toast.error('Authentication required. Please login again.', {
+          duration: 8000,
+        });
+      } else if (error.message === 'Invalid token') {
+        toast.error('Session expired. Please login again.', {
+          duration: 8000,
+        });
+      } else if (error.message === 'Token has been revoked') {
+        toast.error('Session revoked. Please login again.', {
+          duration: 8000,
+        });
+      } else {
+        // Attempt to reconnect for other errors
+        if (reconnectAttempts < maxReconnectAttempts) {
+          attemptReconnect();
+        }
+      }
+    });
+
+    // Handle socket errors
+    socket.on('error', (error) => {
+      console.error('Socket error:', error);
+      toast.error('Connection error occurred', {
+        duration: 5000,
+      });
     });
 
     // Order-related events
@@ -176,12 +275,16 @@ export const SocketProvider = ({ children }) => {
 
     // Cleanup on unmount
     return () => {
+      clearReconnectTimeout();
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      setIsConnected(false);
+      setConnectionStatus('disconnected');
+      setReconnectAttempts(0);
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, accessToken, reconnectAttempts, clearReconnectTimeout, attemptReconnect]);
 
   // Join order-specific room
   const joinOrder = (orderId) => {
@@ -230,7 +333,9 @@ export const SocketProvider = ({ children }) => {
 
   const value = {
     socket: socketRef.current,
-    isConnected: socketRef.current?.connected || false,
+    isConnected,
+    connectionStatus,
+    reconnectAttempts,
     joinOrder,
     leaveOrder,
     joinKitchen,
@@ -238,6 +343,18 @@ export const SocketProvider = ({ children }) => {
     joinRole,
     emit,
     getSocket,
+    // Additional connection management functions
+    reconnect: () => {
+      if (socketRef.current) {
+        setReconnectAttempts(0);
+        socketRef.current.connect();
+      }
+    },
+    disconnect: () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    },
   };
 
   return (

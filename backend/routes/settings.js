@@ -23,12 +23,10 @@ router.get('/', async (req, res) => {
       whereClause += ' AND is_editable = 1';
     }
     
-    const settings = await findMany(
-      'system_settings',
-      whereClause,
-      '*',
-      'setting_key ASC',
-      values.length > 0 ? values.join(' AND ') : ''
+    const { query } = require('../config/database');
+    const settings = await query(
+      `SELECT * FROM system_settings WHERE ${whereClause} ORDER BY setting_key ASC`,
+      values
     );
     
     // Parse values based on data type
@@ -450,7 +448,7 @@ router.get('/config/restaurant', async (req, res) => {
     
     // Extract restaurant-specific configuration
     const restaurantConfig = {
-      name: config.restaurant_name || 'Vogue Cafe D Rush',
+      name: config.restaurant_name || 'FoodPark',
       address: config.restaurant_address || '',
       phone: config.restaurant_phone || '',
       currency: config.currency_symbol || '৳',
@@ -483,7 +481,7 @@ router.post('/reset-to-defaults', requireRole(['admin']), async (req, res) => {
     const defaultSettings = [
       { key: 'vat_percentage', value: '15.00', type: 'number' },
       { key: 'service_charge_percentage', value: '10.00', type: 'number' },
-      { key: 'restaurant_name', value: 'Vogue Cafe D Rush', type: 'string' },
+      { key: 'restaurant_name', value: 'FoodPark', type: 'string' },
       { key: 'restaurant_address', value: '123 Fashion Street, Dhaka', type: 'string' },
       { key: 'restaurant_phone', value: '+8801234567890', type: 'string' },
       { key: 'currency_symbol', value: '৳', type: 'string' },
