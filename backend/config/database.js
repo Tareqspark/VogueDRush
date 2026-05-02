@@ -64,8 +64,8 @@ const transaction = async (callback) => {
 const transactionWithIsolation = async (callback, isolationLevel = 'READ_COMMITTED') => {
   const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
     await connection.query(`SET TRANSACTION ISOLATION LEVEL ${isolationLevel}`);
+    await connection.beginTransaction();
     const result = await callback(connection);
     await connection.commit();
     return result;
