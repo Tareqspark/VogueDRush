@@ -540,6 +540,26 @@ router.patch('/:id/status', validateId, async (req, res) => {
   }
 });
 
+// Link an order to a reservation
+router.patch('/:id/link-order', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { order_id } = req.body;
+
+    if (!order_id) return res.status(400).json({ error: 'order_id is required' });
+
+    const reservation = await findOne('reservations', { id });
+    if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+
+    await update('reservations', { pre_order_id: order_id, updated_at: new Date() }, { id });
+
+    res.json({ message: 'Order linked to reservation' });
+  } catch (error) {
+    console.error('Link order error:', error);
+    res.status(500).json({ error: 'Failed to link order' });
+  }
+});
+
 // Delete reservation
 router.delete('/:id', validateId, async (req, res) => {
   try {

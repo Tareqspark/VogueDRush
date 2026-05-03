@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
   PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
-  PencilSquareIcon, PrinterIcon, LockClosedIcon,
+  PencilSquareIcon, PrinterIcon, LockClosedIcon, ArrowLeftIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -561,8 +561,9 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
 // New Order Modal (POS)
 // ────────────────────────────────────────────────────────────────
 function NewOrderModal({ api, userId, onClose, onCreated }) {
-  const [orderType, setOrderType] = useState('direct');
-  const [selectedTable, setSelectedTable] = useState('');
+  const [step, setStep] = useState('type'); // 'type' | 'table' | 'menu'
+  const [orderType, setOrderType] = useState('');
+  const [selectedTable, setSelectedTable] = useState(null);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -572,17 +573,46 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   const [search, setSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
-  const { data: itemsData } = useQuery(['menu-items', categoryFilter, search], () =>
-    api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: search || undefined } }).then(r => r.data)
+  const { data: tablesData } = useQuery('all-tables', () =>
+    api.get('/tables').then(r => r.data)
   );
-  const { data: tablesData } = useQuery('tables-available', () =>
-    api.get('/tables', { params: { status: 'available' } }).then(r => r.data)
+  const { data: categoriesData } = useQuery('categories', () =>
+    api.get('/menu/categories').then(r => r.data)
+  );
+  const { data: itemsData } = useQuery(
+    ['menu-items', categoryFilter, search],
+    () => api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: search || undefined } }).then(r => r.data),
+    { enabled: step === 'menu' }
   );
 
+  const tables = tablesData?.tables || [];
   const categories = categoriesData || [];
   const items = itemsData?.items || [];
-  const tables = tablesData?.tables || [];
+
+  // Group tables by location in display order
+  const locationOrder = ['Big House', 'Small House', 'AC Chad', 'AC Room', 'RB Garden', 'Garden', 'Lake Side'];
+  const tablesByLocation = tables.reduce((acc, t) => {
+    const loc = t.location || 'Other';
+    if (!acc[loc]) acc[loc] = [];
+    acc[loc].push(t);
+    return acc;
+  }, {});
+  const sortedLocations = [
+    ...locationOrder.filter(l => tablesByLocation[l]),
+    ...Object.keys(tablesByLocation).filter(l => !locationOrder.includes(l)),
+  ];
+
+  const selectType = (type) => {
+    setOrderType(type);
+    if (type === 'dine_in') setStep('table');
+    else setStep('menu');
+  };
+
+  const handleSelectTable = (table) => {
+    if (table.status !== 'available') return;
+    setSelectedTable(table);
+    setStep('menu');
+  };
 
   const addToCart = (item) => {
     setCart(prev => {
@@ -605,14 +635,12 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
 
   const submit = async () => {
     if (cart.length === 0) return toast.error('Add items to cart');
-    if (orderType === 'dine_in' && !selectedTable) return toast.error('Select a table');
     if (orderType === 'delivery' && (!customerName || !customerPhone || !address)) return toast.error('Fill customer details');
-
     setSubmitting(true);
     try {
       const payload = {
         order_type: orderType,
-        table_id: orderType === 'dine_in' ? parseInt(selectedTable) : undefined,
+        table_id: orderType === 'dine_in' ? selectedTable.id : undefined,
         customer_name: orderType === 'delivery' ? customerName : undefined,
         customer_phone: orderType === 'delivery' ? customerPhone : undefined,
         special_instructions: specialInstructions || undefined,
@@ -629,44 +657,165 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
     }
   };
 
+  // ── STEP: TYPE SELECTION ──────────────────────────────────────────
+  if (step === 'type') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl w-full max-w-sm animate-fade-in"
+          style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-black text-slate-800 text-lg">New Order</h2>
+              <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+            </div>
+            <p className="text-sm text-slate-400 mb-5">Choose order type to get started</p>
+            <div className="space-y-3">
+              <button onClick={() => selectType('dine_in')}
+                className="w-full text-left p-4 rounded-xl border-2 border-slate-100 hover:border-sky-400 hover:bg-sky-50 transition-all group">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🍽️</span>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-800 group-hover:text-sky-700">Dine In</div>
+                    <div className="text-xs text-slate-400">Select a table from the floor map</div>
+                  </div>
+                  <span className="text-slate-300 group-hover:text-sky-400 text-lg">→</span>
+                </div>
+              </button>
+              <button onClick={() => selectType('direct')}
+                className="w-full text-left p-4 rounded-xl border-2 border-slate-100 hover:border-emerald-400 hover:bg-emerald-50 transition-all group">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">⚡</span>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-800 group-hover:text-emerald-700">Direct</div>
+                    <div className="text-xs text-slate-400">Counter / takeaway order</div>
+                  </div>
+                  <span className="text-slate-300 group-hover:text-emerald-400 text-lg">→</span>
+                </div>
+              </button>
+              <button onClick={() => selectType('delivery')}
+                className="w-full text-left p-4 rounded-xl border-2 border-slate-100 hover:border-violet-400 hover:bg-violet-50 transition-all group">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🛵</span>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-800 group-hover:text-violet-700">Delivery</div>
+                    <div className="text-xs text-slate-400">Home delivery with customer details</div>
+                  </div>
+                  <span className="text-slate-300 group-hover:text-violet-400 text-lg">→</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── STEP: TABLE PICKER ────────────────────────────────────────────
+  if (step === 'table') {
+    const availableCount = tables.filter(t => t.status === 'available').length;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col animate-fade-in"
+          style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
+          {/* Header */}
+          <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+            <button onClick={() => setStep('type')} className="btn btn-ghost btn-icon">
+              <ArrowLeftIcon className="h-5 w-5" />
+            </button>
+            <div className="flex-1">
+              <h2 className="font-black text-slate-800">Select a Table</h2>
+              <p className="text-xs text-slate-400">{availableCount} of {tables.length} tables available</p>
+            </div>
+            <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+          </div>
+
+          {/* Table grid by location */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-7">
+            {sortedLocations.map(location => (
+              <div key={location}>
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="flex-1 h-px bg-slate-100"></span>
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">{location}</span>
+                  <span className="flex-1 h-px bg-slate-100"></span>
+                </div>
+                <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 gap-2">
+                  {tablesByLocation[location].map(table => {
+                    const isAvailable = table.status === 'available';
+                    const isOccupied = table.status === 'occupied';
+                    return (
+                      <button
+                        key={table.id}
+                        onClick={() => handleSelectTable(table)}
+                        disabled={!isAvailable}
+                        title={`Table ${table.table_number} · ${table.capacity} seats · ${table.status}`}
+                        className={`relative rounded-xl py-3 px-1 border-2 flex flex-col items-center gap-0.5 transition-all
+                          ${ isAvailable
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-500 hover:scale-105 active:scale-95 cursor-pointer shadow-sm'
+                              : isOccupied
+                                ? 'bg-rose-50 border-rose-200 text-rose-400 cursor-not-allowed opacity-60'
+                                : 'bg-amber-50 border-amber-200 text-amber-500 cursor-not-allowed opacity-60'
+                          }`}
+                      >
+                        <span className="font-black text-sm leading-none">{table.table_number}</span>
+                        <span className="text-[9px] font-semibold capitalize leading-none mt-1 opacity-70">
+                          {isAvailable ? `${table.capacity}p` : table.status}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div className="p-4 border-t border-slate-100 flex items-center gap-6 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-emerald-400"></span>Available
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-rose-400"></span>Occupied
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-amber-400"></span>Reserved
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── STEP: MENU + CART ─────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
-      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100"
+      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
         {/* Left: Menu */}
         <div className="flex-1 flex flex-col min-h-0 border-r border-slate-100">
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-black text-slate-800">New Order</h2>
+            <div className="flex items-center gap-3 mb-3">
+              <button onClick={() => orderType === 'dine_in' ? setStep('table') : setStep('type')}
+                className="btn btn-ghost btn-icon">
+                <ArrowLeftIcon className="h-5 w-5" />
+              </button>
+              <div className="flex-1">
+                <h2 className="font-black text-slate-800">
+                  {orderType === 'dine_in' ? `Table ${selectedTable?.table_number}` : TYPE_LABELS[orderType]}
+                </h2>
+                {orderType === 'dine_in' && selectedTable && (
+                  <p className="text-xs text-slate-400">{selectedTable.location} · {selectedTable.capacity} seats</p>
+                )}
+              </div>
               <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
             </div>
-            {/* Order type */}
-            <div className="flex gap-2 mb-3">
-              {['direct','dine_in','delivery'].map(t => (
-                <button key={t} onClick={() => setOrderType(t)}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                    orderType === t
-                      ? 'bg-sky-600 text-white border-sky-600'
-                      : 'bg-white text-slate-500 border-slate-200 hover:border-sky-300'
-                  }`}>
-                  {TYPE_LABELS[t]}
-                </button>
-              ))}
-            </div>
-            {orderType === 'dine_in' && (
-              <select value={selectedTable} onChange={e => setSelectedTable(e.target.value)} className="select mb-2">
-                <option value="">Select Table</option>
-                {tables.map(t => <option key={t.id} value={t.id}>Table {t.table_number} (cap {t.capacity}) - {t.location}</option>)}
-              </select>
-            )}
             {orderType === 'delivery' && (
-              <div className="space-y-2">
+              <div className="space-y-2 mb-3">
                 <input className="input" placeholder="Customer Name *" value={customerName} onChange={e => setCustomerName(e.target.value)} />
                 <input className="input" placeholder="Phone *" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
                 <input className="input" placeholder="Delivery Address *" value={address} onChange={e => setAddress(e.target.value)} />
               </div>
             )}
-            <div className="relative mt-2">
+            <div className="relative">
               <MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <input className="input pl-9" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} />
             </div>

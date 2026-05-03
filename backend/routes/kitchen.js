@@ -48,7 +48,7 @@ router.get('/', async (req, res) => {
     let orderByClause;
     switch (sort_by) {
       case 'priority_created':
-        orderByClause = 'kq.priority DESC, kq.created_at ASC';
+        orderByClause = 'kq.priority DESC, kq.created_at DESC';
         break;
       case 'prep_time':
         orderByClause = 'kq.estimated_prep_time ASC, kq.priority DESC';
@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
         orderByClause = 'o.order_type ASC, kq.priority DESC';
         break;
       default:
-        orderByClause = 'kq.priority DESC, kq.created_at ASC';
+        orderByClause = 'kq.priority DESC, kq.created_at DESC';
     }
     
     // Get kitchen queue with comprehensive details
