@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import {
   PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
+  PencilSquareIcon, PrinterIcon, LockClosedIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -25,6 +26,7 @@ export default function Orders() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
@@ -48,6 +50,18 @@ export default function Orders() {
       queryClient.invalidateQueries(['order-detail', id]);
     } catch (e) {
       toast.error(e.response?.data?.error || 'Failed to update');
+    }
+  };
+
+  const printBill = async (id) => {
+    try {
+      const res = await api.post(`/orders/${id}/bill`);
+      queryClient.invalidateQueries('orders');
+      queryClient.invalidateQueries(['order-detail', id]);
+      return res.data;
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to print bill');
+      return null;
     }
   };
 
@@ -108,6 +122,11 @@ export default function Orders() {
                   {order.customer_name && (
                     <span className="text-sm text-slate-500">{order.customer_name}</span>
                   )}
+                  {order.bill_printed ? (
+                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
+                      <LockClosedIcon className="h-3 w-3" /> Bill Printed
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2.5">
                   <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status]}`}>
@@ -131,8 +150,22 @@ export default function Orders() {
           detail={orderDetail}
           onClose={() => setSelectedOrder(null)}
           onUpdateStatus={updateStatus}
+          onPrintBill={printBill}
+          onEditOrder={(id) => { setEditingOrder(id); setSelectedOrder(null); }}
           userRole={user.role}
           userId={user.id}
+        />
+      )}
+
+      {editingOrder && (
+        <EditOrderModal
+          api={api}
+          orderId={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onSaved={() => {
+            setEditingOrder(null);
+            queryClient.invalidateQueries('orders');
+          }}
         />
       )}
 
@@ -155,8 +188,35 @@ export default function Orders() {
 // ────────────────────────────────────────────────────────────────
 // Order Detail Modal
 // ────────────────────────────────────────────────────────────────
-function OrderDetailModal({ detail, onClose, onUpdateStatus, userRole, userId }) {
+function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, userRole, userId }) {
   const { order, items } = detail;
+  const [printing, setPrinting] = useState(false);
+
+  const activeItems = items.filter(i => i.status !== 'cancelled');
+  const canEdit = !order.bill_printed && !['done', 'cancelled'].includes(order.status)
+    && (userRole === 'admin' || order.waiter_id === userId);
+
+  const nextStatus = { pending: 'preparing', preparing: 'ready', ready: 'done' }[order.status];
+  const nextLabel = { pending: 'Preparing', preparing: 'Ready', ready: 'Done' }[order.status];
+
+  const handlePrint = async () => {
+    setPrinting(true);
+    const data = await onPrintBill(order.id);
+    setPrinting(false);
+    if (data) {
+      const html = buildReceiptHTML(data);
+      const w = window.open('', '_blank', 'width=380,height=650');
+      if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+      toast.success('Bill printed! Order is now locked.');
+    }
+  };
+
+  const handleReprint = () => {
+    const data = { order, items: activeItems, restaurant: { name: 'FoodPark', currency: '৳' } };
+    const html = buildReceiptHTML(data);
+    const w = window.open('', '_blank', 'width=380,height=650');
+    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
@@ -176,11 +236,16 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, userRole, userId })
             <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">{TYPE_LABELS[order.order_type]}</span>
             {order.table_number && <span className="text-xs px-2.5 py-1 rounded-full bg-slate-50 text-slate-600 border font-semibold">Table {order.table_number}</span>}
             {order.customer_name && <span className="text-xs text-slate-500">{order.customer_name} {order.customer_phone}</span>}
+            {order.bill_printed && (
+              <span className="flex items-center gap-1 text-xs bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-1 rounded-full font-semibold">
+                <LockClosedIcon className="h-3 w-3" /> Locked
+              </span>
+            )}
           </div>
 
           {/* Items */}
           <div className="bg-slate-50 rounded-xl p-4 space-y-2">
-            {items.map(item => (
+            {activeItems.map(item => (
               <div key={item.id} className="flex justify-between text-sm">
                 <span className="text-slate-700 font-medium">{item.item_name} <span className="text-slate-400">× {item.quantity}</span></span>
                 <span className="font-bold text-slate-800">৳{parseFloat(item.total_price).toFixed(2)}</span>
@@ -201,21 +266,291 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, userRole, userId })
             </div>
           )}
 
-          {!['done','cancelled'].includes(order.status) && (
-            <div className="flex gap-2 pt-1">
-              {{ pending: 'preparing', preparing: 'ready', ready: 'done' }[order.status] && (
-                <button onClick={() => onUpdateStatus(order.id, { pending: 'preparing', preparing: 'ready', ready: 'done' }[order.status])}
-                  className="btn btn-primary flex-1">
-                  Mark as {{ pending: 'Preparing', preparing: 'Ready', ready: 'Done' }[order.status]}
-                </button>
-              )}
-              {(userRole === 'admin' || order.waiter_id === userId) && (
-                <button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="btn btn-error px-4">
-                  Cancel
-                </button>
-              )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {canEdit && (
+              <button onClick={() => onEditOrder(order.id)}
+                className="btn btn-secondary flex items-center gap-1.5">
+                <PencilSquareIcon className="h-4 w-4" /> Edit Items
+              </button>
+            )}
+
+            {!order.bill_printed && order.status !== 'cancelled' && (userRole === 'admin' || order.waiter_id === userId) && (
+              <button onClick={handlePrint} disabled={printing}
+                className="btn btn-primary flex items-center gap-1.5 disabled:opacity-50">
+                {printing ? <LoadingSpinner size="sm" /> : <PrinterIcon className="h-4 w-4" />}
+                Print Bill
+              </button>
+            )}
+
+            {order.bill_printed && (
+              <button onClick={handleReprint} className="btn btn-secondary flex items-center gap-1.5">
+                <PrinterIcon className="h-4 w-4" /> Re-print
+              </button>
+            )}
+
+            {!['done','cancelled'].includes(order.status) && nextStatus && (
+              <button onClick={() => { onUpdateStatus(order.id, nextStatus); onClose(); }}
+                className="btn btn-primary flex-1">
+                Mark as {nextLabel}
+              </button>
+            )}
+
+            {(userRole === 'admin' || order.waiter_id === userId) && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
+              <button onClick={() => { onUpdateStatus(order.id, 'cancelled'); onClose(); }} className="btn btn-error px-4">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Build receipt HTML for window.print()
+// ────────────────────────────────────────────────────────────────
+function buildReceiptHTML(data) {
+  const { order, items, restaurant = {} } = data;
+  const currency = restaurant.currency || '৳';
+  const rname = restaurant.name || 'FoodPark';
+  const address = restaurant.address || '';
+  const phone = restaurant.phone || '';
+  const activeItems = (items || []).filter(i => i.status !== 'cancelled');
+  const rows = activeItems.map(i =>
+    `<tr><td>${i.item_name || i.name || ''}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">${currency}${parseFloat(i.total_price).toFixed(2)}</td></tr>`
+  ).join('');
+  const vatRow = parseFloat(order.vat_amount) > 0 ? `<tr><td>VAT</td><td style="text-align:right">${currency}${parseFloat(order.vat_amount).toFixed(2)}</td></tr>` : '';
+  const svcRow = parseFloat(order.service_charge) > 0 ? `<tr><td>Service Charge</td><td style="text-align:right">${currency}${parseFloat(order.service_charge).toFixed(2)}</td></tr>` : '';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
+  <style>body{font-family:monospace;font-size:12px;padding:12px;max-width:300px;margin:auto}
+  h2{text-align:center;font-size:16px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
+  table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:11px;text-align:left}
+  td{padding:2px 0}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:14px}
+  .footer{text-align:center;margin-top:10px;font-size:10px;color:#777}@media print{body{margin:0}}</style></head><body>
+  <h2>${rname}</h2>${address ? `<p>${address}</p>` : ''}${phone ? `<p>Tel: ${phone}</p>` : ''}
+  <div class="divider"></div>
+  <p>Order: <strong>${order.order_number}</strong></p>
+  <p>${new Date(order.created_at).toLocaleString()}</p>
+  ${order.table_number ? `<p>Table: ${order.table_number}</p>` : ''}
+  ${order.customer_name ? `<p>Customer: ${order.customer_name}</p>` : ''}
+  <div class="divider"></div>
+  <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="divider"></div>
+  <table><tr><td>Subtotal</td><td style="text-align:right">${currency}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
+  ${vatRow}${svcRow}
+  <tr class="total"><td>TOTAL</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
+  <div class="divider"></div>
+  <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>
+  </body></html>`;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Edit Order Modal — add/remove items from an existing order
+// ────────────────────────────────────────────────────────────────
+function EditOrderModal({ api, orderId, onClose, onSaved }) {
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [toRemove, setToRemove] = useState([]);
+  const [toAdd, setToAdd] = useState([]);
+
+  const { data: orderDetail, isLoading: loadingOrder } = useQuery(
+    ['order-detail-edit', orderId],
+    () => api.get(`/orders/${orderId}`).then(r => r.data)
+  );
+  const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
+  const { data: itemsData } = useQuery(['menu-items-edit', categoryFilter, search],
+    () => api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: search || undefined } }).then(r => r.data)
+  );
+
+  if (loadingOrder) return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/30 backdrop-blur-sm">
+      <LoadingSpinner size="lg" />
+    </div>
+  );
+
+  const { order, items = [] } = orderDetail || {};
+  const currentActiveItems = items.filter(i => i.status !== 'cancelled');
+  const categories = categoriesData || [];
+  const menuItems = itemsData?.items || [];
+
+  const toggleRemove = (id) =>
+    setToRemove(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const addToCart = (item) => setToAdd(prev => {
+    const ex = prev.find(c => c.food_item_id === item.id);
+    if (ex) return prev.map(c => c.food_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+    return [...prev, { food_item_id: item.id, quantity: 1, name: item.name, price: item.promotional_price || item.price }];
+  });
+
+  const changeAddQty = (id, delta) =>
+    setToAdd(prev => prev.map(c => c.food_item_id === id ? { ...c, quantity: Math.max(1, c.quantity + delta) } : c));
+
+  const removeFromAdd = (id) => setToAdd(prev => prev.filter(c => c.food_item_id !== id));
+
+  const save = async () => {
+    if (toRemove.length === 0 && toAdd.length === 0) return toast.error('No changes made');
+    setSaving(true);
+    try {
+      await api.put(`/orders/${orderId}/items`, {
+        add_items: toAdd.map(({ food_item_id, quantity }) => ({ food_item_id, quantity })),
+        remove_item_ids: toRemove,
+      });
+      toast.success('Order updated successfully');
+      queryClient.invalidateQueries(['order-detail', orderId]);
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to update order');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remaining = currentActiveItems.filter(i => !toRemove.includes(i.id)).reduce((s, i) => s + parseFloat(i.total_price), 0);
+  const addSub = toAdd.reduce((s, i) => s + i.price * i.quantity, 0);
+  const previewSub = remaining + addSub;
+  const svcRate = order?.order_type === 'dine_in' ? 0.10 : 0;
+  const previewTotal = previewSub * (1 + 0.15 + svcRate);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
+      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100"
+        style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
+
+        {/* Left: order items + menu */}
+        <div className="flex-1 flex flex-col min-h-0 border-r border-slate-100 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white flex items-center justify-between">
+            <div>
+              <h2 className="font-black text-slate-800">Edit Order</h2>
+              <p className="text-xs text-slate-400 font-mono">{order?.order_number}</p>
             </div>
-          )}
+            <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {/* Current items */}
+            <div className="p-4 border-b border-slate-100">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Current Items</p>
+              <p className="text-xs text-slate-400 mb-3">Click to mark for removal</p>
+              <div className="space-y-2">
+                {currentActiveItems.map(item => (
+                  <div key={item.id} onClick={() => toggleRemove(item.id)}
+                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      toRemove.includes(item.id)
+                        ? 'bg-rose-50 border-rose-300 opacity-60'
+                        : 'bg-white border-slate-100 hover:border-rose-200 hover:bg-rose-50/40'
+                    }`}>
+                    <span className={`text-sm font-medium text-slate-700 ${toRemove.includes(item.id) ? 'line-through' : ''}`}>
+                      {item.item_name} × {item.quantity}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-800">৳{parseFloat(item.total_price).toFixed(0)}</span>
+                      {toRemove.includes(item.id)
+                        ? <span className="text-xs text-rose-500 font-bold">REMOVE</span>
+                        : <TrashIcon className="h-4 w-4 text-slate-300" />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Add items */}
+            <div className="p-4 border-b border-slate-100">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Add Items</p>
+              <div className="relative mb-2">
+                <MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <input className="input pl-9" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                <button onClick={() => setCategoryFilter('')}
+                  className={`px-3 py-1 text-xs font-bold rounded-full whitespace-nowrap ${!categoryFilter ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:text-sky-600'}`}>All</button>
+                {categories.map(c => (
+                  <button key={c.id} onClick={() => setCategoryFilter(String(c.id))}
+                    className={`px-3 py-1 text-xs font-bold rounded-full whitespace-nowrap ${categoryFilter === String(c.id) ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:text-sky-600'}`}>
+                    {c.icon} {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-3">
+              {menuItems.map(item => (
+                <button key={item.id} onClick={() => addToCart(item)}
+                  className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95">
+                  <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
+                  <div className="text-xs text-slate-400 truncate">{item.category_name}</div>
+                  <div className="mt-1 text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Changes summary */}
+        <div className="w-full lg:w-80 flex flex-col bg-slate-50">
+          <div className="p-4 border-b border-slate-200 bg-white">
+            <h2 className="font-black text-slate-800">Changes</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {toRemove.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-rose-500 uppercase tracking-wider mb-2">Removing</p>
+                <div className="space-y-2">
+                  {currentActiveItems.filter(i => toRemove.includes(i.id)).map(item => (
+                    <div key={item.id} className="flex justify-between items-center bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-sm">
+                      <span className="text-rose-700 font-medium">{item.item_name} × {item.quantity}</span>
+                      <button onClick={() => toggleRemove(item.id)} className="text-rose-400 hover:text-rose-600">
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {toAdd.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-2">Adding</p>
+                <div className="space-y-2">
+                  {toAdd.map(item => (
+                    <div key={item.food_item_id} className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-sm font-bold text-emerald-800 truncate">{item.name}</span>
+                        <button onClick={() => removeFromAdd(item.food_item_id)} className="text-emerald-400 hover:text-emerald-600">
+                          <XMarkIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => changeAddQty(item.food_item_id, -1)} className="h-6 w-6 rounded-lg bg-white border border-emerald-200 flex items-center justify-center">
+                          <MinusIcon className="h-3 w-3 text-slate-600" />
+                        </button>
+                        <span className="w-6 text-center text-sm font-black">{item.quantity}</span>
+                        <button onClick={() => changeAddQty(item.food_item_id, 1)} className="h-6 w-6 rounded-lg bg-emerald-100 flex items-center justify-center">
+                          <PlusIcon className="h-3 w-3 text-emerald-700" />
+                        </button>
+                        <span className="text-xs text-slate-500 ml-auto">৳{(item.price * item.quantity).toFixed(0)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {toRemove.length === 0 && toAdd.length === 0 && (
+              <div className="text-center mt-8">
+                <PencilSquareIcon className="h-10 w-10 text-slate-200 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">Select items to remove or add from the menu</p>
+              </div>
+            )}
+          </div>
+          <div className="p-4 border-t border-slate-200 space-y-3 bg-white">
+            <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
+              <div className="flex justify-between text-slate-500 text-xs"><span>New Subtotal</span><span>৳{previewSub.toFixed(2)}</span></div>
+              <div className="flex justify-between font-black text-slate-800 border-t border-slate-200 pt-2"><span>Est. Total</span><span>৳{previewTotal.toFixed(2)}</span></div>
+            </div>
+            <button onClick={save} disabled={saving || (toRemove.length === 0 && toAdd.length === 0)}
+              className="btn btn-primary w-full disabled:opacity-50 justify-center">
+              {saving ? <LoadingSpinner size="sm" /> : <><CheckIcon className="h-4 w-4" />Save Changes</>}
+            </button>
+          </div>
         </div>
       </div>
     </div>

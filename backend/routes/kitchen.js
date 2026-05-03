@@ -268,7 +268,8 @@ router.patch('/:id/ready', validateId, async (req, res) => {
     let actualPrepTime = null;
     
     if (queueItem.started_at) {
-      actualPrepTime = Math.floor((now - new Date(queueItem.started_at)) / 60000); // in minutes
+      // Keep prep time compatible with DB check constraint (> 0)
+      actualPrepTime = Math.max(1, Math.floor((now - new Date(queueItem.started_at)) / 60000)); // in minutes
     }
     
     // Update kitchen queue item

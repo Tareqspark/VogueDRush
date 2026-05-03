@@ -113,7 +113,8 @@ router.get('/', async (req, res) => {
     // Get orders with joins
     const ordersQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
-             t.table_number, t.location as table_location
+             t.table_number, t.location as table_location,
+             o.bill_printed, o.bill_printed_at
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
@@ -155,7 +156,8 @@ router.get('/:id', validateId, async (req, res) => {
     // Get order details
     const orderQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
-             t.table_number, t.location as table_location
+             t.table_number, t.location as table_location,
+             o.bill_printed, o.bill_printed_at
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
@@ -634,6 +636,178 @@ router.get('/stats/overview', async (req, res) => {
   } catch (error) {
     console.error('Get order stats error:', error);
     res.status(500).json({ error: 'Failed to fetch order statistics' });
+  }
+});
+
+// Modify order items (add/remove) — blocked once bill is printed
+router.put('/:id/items', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { add_items = [], remove_item_ids = [] } = req.body;
+
+    const { query: dbQuery } = require('../config/database');
+
+    // Load order
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    // Lock after bill printed
+    if (order.bill_printed) {
+      return res.status(403).json({ error: 'Order is locked — bill has been printed', code: 'ORDER_LOCKED' });
+    }
+
+    // Permission check — waiter must own the order; admin can do anything
+    if (req.user.role !== 'admin' && order.waiter_id !== req.user.id) {
+      return res.status(403).json({ error: 'Insufficient permissions to modify this order' });
+    }
+
+    // Cannot modify cancelled / done orders
+    if (['done', 'cancelled'].includes(order.status)) {
+      return res.status(400).json({ error: `Cannot modify order with status: ${order.status}` });
+    }
+
+    await transaction(async (conn) => {
+      // Remove items
+      for (const itemId of remove_item_ids) {
+        const [rows] = await conn.query('SELECT * FROM order_items WHERE id = ? AND order_id = ?', [itemId, id]);
+        const oi = rows[0];
+        if (!oi) continue;
+        if (oi.status === 'cancelled') continue; // already cancelled
+
+        await conn.query('UPDATE order_items SET status = ?, updated_at = NOW() WHERE id = ?', ['cancelled', itemId]);
+        await conn.query('UPDATE kitchen_queue SET status = ?, updated_at = NOW() WHERE order_item_id = ?', ['cancelled', itemId]);
+      }
+
+      // Add items
+      for (const item of add_items) {
+        const [foodRows] = await conn.query('SELECT * FROM food_items WHERE id = ? AND is_available = 1', [item.food_item_id]);
+        const fi = foodRows[0];
+        if (!fi) throw new Error(`Food item ${item.food_item_id} not found or unavailable`);
+
+        const qty = parseInt(item.quantity) || 1;
+        const unitPrice = fi.promotional_price || fi.price;
+        const itemTotal = unitPrice * qty;
+
+        const [oir] = await conn.query(
+          'INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status) VALUES (?,?,?,?,?,?,?)',
+          [id, fi.id, qty, unitPrice, itemTotal, item.special_instructions || null, 'pending']
+        );
+
+        await conn.query(
+          'INSERT INTO kitchen_queue (order_id, order_item_id, priority, estimated_prep_time, status) VALUES (?,?,?,?,?)',
+          [id, oir.insertId, 0, fi.preparation_time || 15, 'queued']
+        );
+      }
+
+      // Recalculate totals from active items
+      const [activeItems] = await conn.query(
+        "SELECT oi.*, fi.vat_rate FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ? AND oi.status != 'cancelled'",
+        [id]
+      );
+
+      let subtotal = 0, vatAmount = 0;
+      for (const ai of activeItems) {
+        subtotal += parseFloat(ai.total_price);
+        vatAmount += (parseFloat(ai.total_price) * parseFloat(ai.vat_rate)) / 100;
+      }
+
+      const [settings] = await conn.query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('service_charge_percentage')");
+      const svcPct = order.order_type === 'dine_in' ? parseFloat(settings[0]?.setting_value || 10) : 0;
+      const serviceCharge = (subtotal * svcPct) / 100;
+      const totalAmount = subtotal + vatAmount + serviceCharge;
+
+      await conn.query(
+        'UPDATE orders SET subtotal=?, vat_amount=?, service_charge=?, total_amount=?, updated_at=NOW() WHERE id=?',
+        [subtotal, vatAmount, serviceCharge, totalAmount, id]
+      );
+    });
+
+    // Return updated order
+    const updatedOrder = await findOne('orders', { id });
+    const { query: q } = require('../config/database');
+    const items = await q(
+      "SELECT oi.*, fi.name as item_name FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ?",
+      [id]
+    );
+
+    await logManualAudit(
+      req.user.id, 'modify_items', 'orders', parseInt(id),
+      null,
+      { add_items, remove_item_ids },
+      req.ip, req.headers['user-agent']
+    );
+
+    const io = req.app.get('io');
+    if (io) io.emit('order-modified', { orderId: parseInt(id), modifiedBy: req.user.username });
+
+    res.json({ message: 'Order items updated successfully', order: updatedOrder, items });
+  } catch (error) {
+    console.error('Modify order items error:', error);
+    res.status(400).json({ error: error.message || 'Failed to modify order items' });
+  }
+});
+
+// Print bill — locks the order against further modifications
+router.post('/:id/bill', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    if (order.bill_printed) {
+      return res.status(400).json({ error: 'Bill has already been printed for this order' });
+    }
+
+    if (['cancelled'].includes(order.status)) {
+      return res.status(400).json({ error: 'Cannot print bill for a cancelled order' });
+    }
+
+    // Mark bill printed
+    await update('orders', {
+      bill_printed: true,
+      bill_printed_at: new Date(),
+      updated_at: new Date()
+    }, { id });
+
+    // Fetch full bill data
+    const { query: dbQuery } = require('../config/database');
+    const updatedOrder = await findOne('orders', { id });
+    const items = await dbQuery(
+      "SELECT oi.*, fi.name as item_name FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ? AND oi.status != 'cancelled'",
+      [id]
+    );
+
+    const settings = await findMany('system_settings', {}, 'setting_key, setting_value');
+    const settingsMap = {};
+    settings.forEach(s => { settingsMap[s.setting_key] = s.setting_value; });
+
+    await logManualAudit(
+      req.user.id, 'print_bill', 'orders', parseInt(id),
+      { bill_printed: false },
+      { bill_printed: true, bill_printed_at: new Date() },
+      req.ip, req.headers['user-agent']
+    );
+
+    const io = req.app.get('io');
+    if (io) io.emit('bill-printed', { orderId: parseInt(id), printedBy: req.user.username });
+
+    res.json({
+      message: 'Bill printed successfully',
+      order: updatedOrder,
+      items,
+      restaurant: {
+        name: settingsMap.restaurant_name || 'FoodPark',
+        address: settingsMap.restaurant_address || '',
+        phone: settingsMap.restaurant_phone || '',
+        currency: settingsMap.currency_symbol || '৳',
+        vat_percentage: settingsMap.vat_percentage || '15',
+        service_charge_percentage: settingsMap.service_charge_percentage || '10',
+      }
+    });
+  } catch (error) {
+    console.error('Print bill error:', error);
+    res.status(500).json({ error: 'Failed to print bill' });
   }
 });
 
