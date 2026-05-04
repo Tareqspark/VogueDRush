@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -18,7 +19,7 @@ const deliveryRoutes = require('./routes/delivery');
 const reportRoutes = require('./routes/reports');
 const settingsRoutes = require('./routes/settings');
 
-const { authenticateToken } = require('./middleware/auth');
+const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
 const { errorHandler, asyncHandler, notFound } = require('./middleware/errorHandler');
 const { createRateLimiter, rateLimiters, createRoleBasedLimiter } = require('./middleware/rateLimiter');
@@ -116,6 +117,9 @@ app.use(helmet({
 
 // Apply rate limiting
 app.use('/api/', rateLimiters.general);
+
+// Cookie parsing (required for httpOnly token cookies — C-1 fix)
+app.use(cookieParser());
 
 // Body parsing middleware with size limits
 app.use(express.json({ 
@@ -280,6 +284,12 @@ io.on('connection', (socket) => {
   // Handle table status updates
   socket.on('table-status-update', async (data) => {
     try {
+      // C-8: Only admins may change table status via socket (mirrors REST requireAdmin)
+      if (socket.user.role !== 'admin') {
+        socket.emit('error', { message: 'Insufficient permissions to update table status' });
+        return;
+      }
+
       const { tableId, status } = data;
       
       if (!tableId || !status) {
@@ -383,6 +393,10 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔌 Socket.IO enabled for real-time updates`);
+
+  // M-8: Run token blacklist / session cleanup once immediately, then every hour
+  cleanupExpiredTokens();
+  setInterval(cleanupExpiredTokens, 60 * 60 * 1000);
 });
 
 module.exports = { app, server, io };

@@ -40,8 +40,8 @@ const validateUser = [
     .withMessage('Role must be admin, waiter, or kitchen'),
   body('password')
     .if(body('password').exists())
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long'),
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters long'),
   handleValidationErrors
 ];
 

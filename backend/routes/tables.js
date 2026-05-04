@@ -10,7 +10,8 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const { status, location, page = 1, limit = 100 } = req.query;
-    const limitInt = parseInt(limit) || 50;
+    // M-4: cap limit to prevent full-table scans
+    const limitInt = Math.min(parseInt(limit) || 100, 500);
     const offsetInt = (parseInt(page) - 1) * limitInt;
     
     let whereClause = '1=1';
@@ -36,28 +37,34 @@ router.get('/', async (req, res) => {
     const countResult = await query(`SELECT COUNT(*) as total FROM tables WHERE ${whereClause}`, values);
     const total = countResult[0].total;
     
-    // Get current orders for each table
-    for (const table of tables) {
-      if (table.status === 'occupied') {
-        const activeOrders = await query(
-          `SELECT id, order_number, status, created_at, total_amount FROM orders 
-           WHERE table_id = ? AND status IN ('pending', 'preparing', 'ready') 
-           ORDER BY created_at DESC LIMIT 1`,
-          [table.id]
-        );
-        table.current_order = activeOrders[0] || null;
-      } else {
-        table.current_order = null;
+    // M-5: Batch-fetch active orders for all occupied tables in one query instead of N+1 loop
+    const occupiedIds = tables.filter(t => t.status === 'occupied').map(t => t.id);
+    const activeOrdersByTable = {};
+    if (occupiedIds.length > 0) {
+      const placeholders = occupiedIds.map(() => '?').join(', ');
+      const activeOrders = await query(
+        `SELECT id, table_id, order_number, status, created_at, total_amount
+         FROM orders
+         WHERE table_id IN (${placeholders}) AND status IN ('pending', 'preparing', 'ready')
+         ORDER BY created_at DESC`,
+        occupiedIds
+      );
+      // Keep only the most recent order per table (results are already DESC by created_at)
+      for (const o of activeOrders) {
+        if (!activeOrdersByTable[o.table_id]) activeOrdersByTable[o.table_id] = o;
       }
+    }
+    for (const table of tables) {
+      table.current_order = activeOrdersByTable[table.id] || null;
     }
     
     res.json({
       tables,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: limitInt,
         total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limitInt) // M-3 fix: use parsed limitInt
       }
     });
     

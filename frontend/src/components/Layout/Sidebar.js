@@ -12,9 +12,20 @@ import {
   CogIcon,
   UserIcon,
   DocumentTextIcon,
+  ClipboardDocumentListIcon,
   XMarkIcon,
   CalendarDaysIcon,
   ArrowRightOnRectangleIcon,
+  CubeIcon,
+  ArchiveBoxIcon,
+  BuildingStorefrontIcon,
+  UserGroupIcon,
+  CurrencyDollarIcon,
+  BanknotesIcon,
+  ClipboardDocumentCheckIcon,
+  QrCodeIcon,
+  GlobeAltIcon,
+  PresentationChartLineIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -29,6 +40,7 @@ const NAV_SECTIONS = [
       { name: 'Reservations', href: '/reservations', icon: CalendarDaysIcon,    roles: ['admin', 'waiter'] },
       { name: 'Delivery',     href: '/delivery',     icon: TruckIcon,           roles: ['admin', 'waiter'] },
       { name: 'Change Log',   href: '/changelog',    icon: DocumentTextIcon,    roles: ['admin', 'waiter', 'kitchen'] },
+      { name: 'QA Guide',     href: '/qa-guide',     icon: ClipboardDocumentListIcon, roles: ['admin', 'waiter', 'kitchen'] },
     ],
   },
   {
@@ -38,6 +50,23 @@ const NAV_SECTIONS = [
       { name: 'Users',    href: '/users',    icon: UsersIcon,    roles: ['admin'] },
       { name: 'Reports',  href: '/reports',  icon: ChartBarIcon, roles: ['admin'] },
       { name: 'Settings', href: '/settings', icon: CogIcon,      roles: ['admin'] },
+    ],
+  },
+  {
+    label: 'ERP Modules',
+    items: [
+      { name: 'Inventory',          href: '/inventory',             icon: CubeIcon,                    roles: ['admin'] },
+      { name: 'Purchase',           href: '/purchase',              icon: ArchiveBoxIcon,              roles: ['admin'] },
+      { name: 'Suppliers',          href: '/suppliers',             icon: BuildingStorefrontIcon,      roles: ['admin'] },
+      { name: 'CRM & Loyalty',      href: '/crm',                   icon: UserGroupIcon,               roles: ['admin'] },
+      { name: 'Expenses',           href: '/expenses',              icon: CurrencyDollarIcon,          roles: ['admin'] },
+      { name: 'Accounting',         href: '/accounting',            icon: BanknotesIcon,               roles: ['admin'] },
+      { name: 'HR & Payroll',       href: '/hr',                    icon: ClipboardDocumentCheckIcon,  roles: ['admin'] },
+      { name: 'QR Ordering',        href: '/qr-ordering',           icon: QrCodeIcon,                  roles: ['admin'] },
+      { name: 'Fleet',              href: '/fleet',                 icon: TruckIcon,                   roles: ['admin'] },
+      { name: 'Reservations Pro',   href: '/advanced-reservations', icon: CalendarDaysIcon,            roles: ['admin'] },
+      { name: 'Branches',           href: '/branches',              icon: GlobeAltIcon,                roles: ['admin'] },
+      { name: 'Business Intel.',    href: '/bi',                    icon: PresentationChartLineIcon,   roles: ['admin'] },
     ],
   },
 ];

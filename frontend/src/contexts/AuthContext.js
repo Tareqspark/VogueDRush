@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
   timeout: 10000,
+  withCredentials: true, // C-1 fix: send httpOnly cookies on every request
 });
 
 // Initial state
@@ -149,7 +150,7 @@ export const AuthProvider = ({ children }) => {
       }
     );
 
-    // Response interceptor - handle token refresh
+    // Response interceptor - handle token refresh using httpOnly cookies (C-1 fix)
     const responseInterceptor = api.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -159,40 +160,34 @@ export const AuthProvider = ({ children }) => {
           originalRequest._retry = true;
 
           try {
-            const refreshToken = localStorage.getItem('refreshToken');
-            const sessionToken = localStorage.getItem('sessionToken');
-            if (refreshToken && sessionToken) {
-              const response = await axios.post(
-                `${api.defaults.baseURL}/auth/refresh`,
-                { refreshToken, sessionToken }
-              );
+            // Send empty body — backend reads refreshToken + sessionToken from httpOnly cookies
+            const response = await axios.post(
+              `${api.defaults.baseURL}/auth/refresh`,
+              {},
+              { withCredentials: true }
+            );
 
-              const { accessToken, refreshToken: newRefreshToken, sessionToken: newSessionToken, user } = response.data;
+            const { accessToken, refreshToken: newRefreshToken, sessionToken: newSessionToken, user } = response.data;
 
-              dispatch({
-                type: AUTH_ACTIONS.REFRESH_SUCCESS,
-                payload: {
-                  accessToken,
-                  refreshToken: newRefreshToken,
-                  sessionToken: newSessionToken,
-                  user,
-                },
-              });
+            dispatch({
+              type: AUTH_ACTIONS.REFRESH_SUCCESS,
+              payload: {
+                accessToken,
+                refreshToken: newRefreshToken,
+                sessionToken: newSessionToken,
+                user,
+              },
+            });
 
-              localStorage.setItem('accessToken', accessToken);
-              localStorage.setItem('refreshToken', newRefreshToken);
-              localStorage.setItem('sessionToken', newSessionToken);
+            // Only store non-sensitive user object in localStorage
+            localStorage.setItem('user', JSON.stringify(user));
 
-              // Retry the original request
-              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-              return api(originalRequest);
-            }
+            // Retry the original request with new access token
+            originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+            return api(originalRequest);
           } catch (refreshError) {
             // Refresh failed, logout user
             dispatch({ type: AUTH_ACTIONS.LOGOUT });
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
-            localStorage.removeItem('sessionToken');
             localStorage.removeItem('user');
             toast.error('Session expired. Please login again.');
             return Promise.reject(refreshError);
@@ -209,7 +204,8 @@ export const AuthProvider = ({ children }) => {
     };
   }, [state.accessToken]);
 
-  // Decode JWT payload without a library (base64url decode)
+  // Decode JWT payload without a library (base64url decode) — kept for future use
+  // eslint-disable-next-line no-unused-vars
   const decodeToken = (token) => {
     try {
       const payload = token.split('.')[1];
@@ -220,71 +216,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Initialize auth state from localStorage — no network call, instant load
+  // Initialize auth state — restore session via httpOnly cookie refresh (C-1 fix)
+  // Tokens are never stored in localStorage; only the non-sensitive user object is.
   useEffect(() => {
-    const initializeAuth = () => {
-      const accessToken = localStorage.getItem('accessToken');
-      const refreshToken = localStorage.getItem('refreshToken');
-      const sessionToken = localStorage.getItem('sessionToken');
-      const userRaw = localStorage.getItem('user');
-
-      const clearAndLogout = () => {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('sessionToken');
+    const initializeAuth = async () => {
+      try {
+        // Attempt to restore session using the httpOnly refreshToken cookie.
+        // If the cookie is absent or expired, the server returns 401 and we stay logged out.
+        const res = await axios.post(
+          `${api.defaults.baseURL}/auth/refresh`,
+          {},
+          { withCredentials: true }
+        );
+        const { accessToken, refreshToken: newRefresh, sessionToken: newSession, user } = res.data;
+        localStorage.setItem('user', JSON.stringify(user));
+        dispatch({
+          type: AUTH_ACTIONS.LOGIN_SUCCESS,
+          payload: { user, accessToken, refreshToken: newRefresh, sessionToken: newSession },
+        });
+      } catch {
+        // No valid session — clear any stale user data and go to login
         localStorage.removeItem('user');
-        dispatch({ type: AUTH_ACTIONS.LOGOUT });
-      };
-
-      if (accessToken && refreshToken && sessionToken && userRaw) {
-        const decoded = decodeToken(accessToken);
-        const now = Math.floor(Date.now() / 1000);
-
-        if (!decoded) {
-          clearAndLogout();
-          return;
-        }
-
-        if (decoded.exp && decoded.exp > now) {
-          // Token still valid — restore session immediately without a network round-trip
-          try {
-            const user = JSON.parse(userRaw);
-            dispatch({
-              type: AUTH_ACTIONS.LOGIN_SUCCESS,
-              payload: { user, accessToken, refreshToken, sessionToken },
-            });
-          } catch {
-            clearAndLogout();
-          }
-        } else {
-          // Token expired — try to refresh in the background
-          axios
-            .post(`${api.defaults.baseURL}/auth/refresh`, { refreshToken, sessionToken })
-            .then((res) => {
-              const {
-                accessToken: newAccess,
-                refreshToken: newRefresh,
-                sessionToken: newSession,
-                user,
-              } = res.data;
-              localStorage.setItem('accessToken', newAccess);
-              localStorage.setItem('refreshToken', newRefresh);
-              localStorage.setItem('sessionToken', newSession);
-              localStorage.setItem('user', JSON.stringify(user));
-              dispatch({
-                type: AUTH_ACTIONS.REFRESH_SUCCESS,
-                payload: {
-                  accessToken: newAccess,
-                  refreshToken: newRefresh,
-                  sessionToken: newSession,
-                  user,
-                },
-              });
-            })
-            .catch(() => clearAndLogout());
-        }
-      } else {
-        // No tokens — go straight to login, loading: false
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
       }
     };
@@ -300,10 +252,7 @@ export const AuthProvider = ({ children }) => {
       const response = await api.post('/auth/login', credentials);
       const { user, accessToken, refreshToken, sessionToken } = response.data;
 
-      // Store in localStorage
-      localStorage.setItem('accessToken', accessToken);
-      localStorage.setItem('refreshToken', refreshToken);
-      localStorage.setItem('sessionToken', sessionToken);
+      // C-1 fix: tokens are in httpOnly cookies set by server — only store non-sensitive user object
       localStorage.setItem('user', JSON.stringify(user));
 
       dispatch({
@@ -330,17 +279,14 @@ export const AuthProvider = ({ children }) => {
     try {
       await api.post('/auth/logout', {
         userId: state.user?.id,
-        sessionToken: state.sessionToken || localStorage.getItem('sessionToken'),
+        // sessionToken also sent via httpOnly cookie automatically (C-1 fix)
       });
     } catch (error) {
       // Continue with logout even if API call fails
       console.error('Logout API call failed:', error);
     }
 
-    // Clear localStorage
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('sessionToken');
+    // C-1 fix: tokens are cleared server-side via clearCookie(); only remove user object here
     localStorage.removeItem('user');
 
     dispatch({ type: AUTH_ACTIONS.LOGOUT });
@@ -370,7 +316,6 @@ export const AuthProvider = ({ children }) => {
       const response = await api.put(`/users/${state.user.id}`, profileData);
       const updatedUser = response.data.user;
 
-      // Update localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
       dispatch({

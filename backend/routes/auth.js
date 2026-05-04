@@ -5,10 +5,12 @@ const { generateTokens, logout } = require('../middleware/auth');
 const { validateLogin } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
+const { rateLimiters } = require('../middleware/rateLimiter');
+
 const router = express.Router();
 
-// Login endpoint with secure token storage (rate limiter temporarily removed for testing)
-router.post('/login', async (req, res) => {
+// Login endpoint
+router.post('/login', rateLimiters.auth, async (req, res) => {
   try {
     const { username, password } = req.body;
     
@@ -63,7 +65,7 @@ router.post('/login', async (req, res) => {
       req.headers['user-agent']
     );
     
-    // Set httpOnly cookies
+    // Set httpOnly cookies (C-1 fix: all three tokens in secure cookies)
     res.cookie('accessToken', tokens.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -72,6 +74,13 @@ router.post('/login', async (req, res) => {
     });
     
     res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    res.cookie('sessionToken', tokens.sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',

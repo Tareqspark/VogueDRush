@@ -17,41 +17,55 @@ const generateOrderNumber = () => {
   return `ORD${year}${month}${day}${random}`;
 };
 
-// Calculate order totals (M-4: applies delivery_fee from settings for delivery orders)
-const calculateOrderTotals = async (items, orderType) => {
+// Calculate order totals.
+// C-2 fix: accept an optional `connection` so this can run inside a SERIALIZABLE transaction
+//          using the same connection, avoiding TOCTOU price races.
+// M-2 fix: use global `vat_percentage` from system_settings so the Settings page is effective.
+const calculateOrderTotals = async (items, orderType, connection = null) => {
   let subtotal = 0;
-  let totalVat = 0;
-  
+
+  // Helper: run a query either on the provided connection (inside a txn) or the pool
+  const dbQuery = async (sql, params) => {
+    if (connection) {
+      const [rows] = await connection.query(sql, params);
+      return rows;
+    }
+    return query(sql, params);
+  };
+
   for (const item of items) {
-    const foodItem = await findOne('food_items', { id: item.food_item_id });
+    const rows = await dbQuery(
+      'SELECT id, price, promotional_price, is_available FROM food_items WHERE id = ?',
+      [item.food_item_id]
+    );
+    const foodItem = rows[0];
     if (!foodItem || !foodItem.is_available) {
       throw new Error(`Food item ${item.food_item_id} not available`);
     }
-    
+
     const unitPrice = foodItem.promotional_price || foodItem.price;
-    const itemTotal = unitPrice * item.quantity;
-    const itemVat = (itemTotal * foodItem.vat_rate) / 100;
-    
-    subtotal += itemTotal;
-    totalVat += itemVat;
+    subtotal += unitPrice * item.quantity;
   }
-  
-  // Get system settings
-  const settings = await findMany('system_settings', {}, 'setting_key, setting_value');
+
+  // Fetch relevant settings via the same connection
+  const settingsRows = await dbQuery(
+    "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('vat_percentage', 'service_charge_percentage', 'delivery_fee')",
+    []
+  );
   const settingsMap = {};
-  settings.forEach(setting => {
-    settingsMap[setting.setting_key] = setting.setting_value;
-  });
-  
+  settingsRows.forEach(s => { settingsMap[s.setting_key] = s.setting_value; });
+
+  const vatPercentage = parseFloat(settingsMap.vat_percentage || 15);
   const serviceChargePercentage = orderType === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
   const deliveryFee = orderType === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;
-  
+
+  const vatAmount = (subtotal * vatPercentage) / 100;
   const serviceCharge = (subtotal * serviceChargePercentage) / 100;
-  const totalAmount = subtotal + totalVat + serviceCharge + deliveryFee;
-  
+  const totalAmount = subtotal + vatAmount + serviceCharge + deliveryFee;
+
   return {
     subtotal,
-    vat_amount: totalVat,
+    vat_amount: vatAmount,
     service_charge: serviceCharge,
     delivery_fee: deliveryFee,
     discount_amount: 0,
@@ -73,7 +87,7 @@ router.get('/', async (req, res) => {
       table_id 
     } = req.query;
     
-    const limitInt = parseInt(limit) || 50;
+    const limitInt = Math.min(parseInt(limit) || 50, 200); // M-4: cap at 200 to prevent full-table scans
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
@@ -143,7 +157,7 @@ router.get('/', async (req, res) => {
         page: parseInt(page),
         limit: limitInt,
         total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limitInt) // M-3 fix: use parsed limitInt, not raw query string
       }
     });
     
@@ -390,8 +404,8 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
         }
       }
       
-      // Calculate totals
-      const totals = await calculateOrderTotals(items, order_type);
+      // Calculate totals — pass connection so reads stay inside the SERIALIZABLE transaction (C-2 fix)
+      const totals = await calculateOrderTotals(items, order_type, connection);
       
       // Insert order
       const orderData = {
@@ -476,13 +490,16 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       
       // Insert delivery details if applicable
       if (order_type === 'delivery' && delivery_details) {
-        // M-1: Store order_time / delivery_time in proper TIME columns (not as a string)
+        const advance = parseFloat(delivery_details.advance_payment || 0);
+        // M-6: Server computes due_amount from the verified total — do not trust client value
+        const serverDue = Math.max(0, parseFloat(totals.total_amount) - advance);
+
         const deliveryData = {
           order_id: orderId,
           customer_address: delivery_details.customer_address || null,
           delivery_phone: delivery_details.delivery_phone || customer_phone || null,
-          advance_payment: delivery_details.advance_payment || 0.00,
-          due_amount: delivery_details.due_amount || 0.00,
+          advance_payment: advance,
+          due_amount: serverDue,
           order_time: delivery_details.order_time || null,
           delivery_time: delivery_details.delivery_time || null,
           delivery_notes: delivery_details.delivery_notes || null
@@ -554,6 +571,174 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
   }
 });
 
+// C-7: Edit order items — add/remove items from an active, unlocked order
+// Frontend calls: PUT /api/orders/:id/items  { add_items: [{food_item_id, quantity}], remove_item_ids: [id,...] }
+router.put('/:id/items', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { add_items = [], remove_item_ids = [] } = req.body;
+
+    if (!Array.isArray(add_items) || !Array.isArray(remove_item_ids)) {
+      return res.status(400).json({ error: 'add_items and remove_item_ids must be arrays' });
+    }
+    if (add_items.length === 0 && remove_item_ids.length === 0) {
+      return res.status(400).json({ error: 'No changes provided' });
+    }
+
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.bill_printed) return res.status(400).json({ error: 'Order is locked — bill has been printed', code: 'ORDER_LOCKED' });
+    if (['done', 'cancelled'].includes(order.status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled order' });
+    }
+    // Only the waiter who created the order or an admin may edit it
+    if (req.user.role !== 'admin' && order.waiter_id !== req.user.id) {
+      return res.status(403).json({ error: 'Only the assigned waiter or an admin can edit this order' });
+    }
+
+    const result = await transaction(async (connection) => {
+      // ── 1. Remove items ──────────────────────────────────────────
+      for (const itemId of remove_item_ids) {
+        const [rows] = await connection.query(
+          'SELECT * FROM order_items WHERE id = ? AND order_id = ? AND status != ?',
+          [itemId, id, 'cancelled']
+        );
+        const item = rows[0];
+        if (!item) {
+          throw new Error(`Order item ${itemId} not found or already cancelled`);
+        }
+
+        await connection.query(
+          'UPDATE order_items SET status = ?, updated_at = NOW() WHERE id = ?',
+          ['cancelled', itemId]
+        );
+        await connection.query(
+          'UPDATE kitchen_queue SET status = ?, updated_at = NOW() WHERE order_item_id = ?',
+          ['cancelled', itemId]
+        );
+        // Restore inventory
+        await connection.query(
+          'UPDATE food_inventory SET current_stock = current_stock + ?, last_updated = NOW() WHERE food_item_id = ?',
+          [item.quantity, item.food_item_id]
+        );
+        await connection.query(
+          'INSERT INTO order_modifications (order_id, modified_by, modification_type, description, old_values, price_change) VALUES (?, ?, ?, ?, ?, ?)',
+          [id, req.user.id, 'remove_item', `Removed item #${itemId} qty:${item.quantity}`, JSON.stringify(item), -parseFloat(item.total_price)]
+        );
+      }
+
+      // ── 2. Add new items ─────────────────────────────────────────
+      for (const newItem of add_items) {
+        const [foodRows] = await connection.query(
+          'SELECT * FROM food_items WHERE id = ? AND is_available = 1',
+          [newItem.food_item_id]
+        );
+        const foodItem = foodRows[0];
+        if (!foodItem) {
+          throw new Error(`Food item ${newItem.food_item_id} not found or unavailable`);
+        }
+
+        const [invRows] = await connection.query(
+          'SELECT current_stock FROM food_inventory WHERE food_item_id = ?',
+          [newItem.food_item_id]
+        );
+        const inventory = invRows[0];
+        if (inventory && inventory.current_stock < newItem.quantity) {
+          throw new Error(`Insufficient stock for item ${newItem.food_item_id}`);
+        }
+
+        const unitPrice = foodItem.promotional_price || foodItem.price;
+        const itemTotal = unitPrice * newItem.quantity;
+
+        const [insertResult] = await connection.query(
+          'INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, status) VALUES (?, ?, ?, ?, ?, ?)',
+          [id, newItem.food_item_id, newItem.quantity, unitPrice, itemTotal, 'pending']
+        );
+        await connection.query(
+          'UPDATE food_inventory SET current_stock = current_stock - ?, last_updated = NOW() WHERE food_item_id = ?',
+          [newItem.quantity, newItem.food_item_id]
+        );
+        await connection.query(
+          'INSERT INTO kitchen_queue (order_id, order_item_id, priority, estimated_prep_time, status) VALUES (?, ?, ?, ?, ?)',
+          [id, insertResult.insertId, 0, foodItem.preparation_time || 15, 'queued']
+        );
+        await connection.query(
+          'INSERT INTO order_modifications (order_id, modified_by, modification_type, description, new_values, price_change) VALUES (?, ?, ?, ?, ?, ?)',
+          [id, req.user.id, 'add_item', `Added ${foodItem.name} qty:${newItem.quantity}`, JSON.stringify({ food_item_id: newItem.food_item_id, quantity: newItem.quantity, unit_price: unitPrice }), itemTotal]
+        );
+      }
+
+      // Ensure at least one active item remains after changes
+      const [remainCheck] = await connection.query(
+        "SELECT COUNT(*) as cnt FROM order_items WHERE order_id = ? AND status != 'cancelled'",
+        [id]
+      );
+      if (remainCheck[0].cnt === 0) {
+        throw new Error('Cannot remove all items from an order. Cancel the order instead.');
+      }
+
+      // ── 3. Recalculate order totals ──────────────────────────────
+      const [activeItems] = await connection.query(
+        "SELECT total_price FROM order_items WHERE order_id = ? AND status != 'cancelled'",
+        [id]
+      );
+      const [settingsRows] = await connection.query(
+        "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('vat_percentage', 'service_charge_percentage', 'delivery_fee')"
+      );
+      const sm = {};
+      settingsRows.forEach(s => { sm[s.setting_key] = s.setting_value; });
+
+      const newSubtotal = activeItems.reduce((s, i) => s + parseFloat(i.total_price), 0);
+      const vatPct = parseFloat(sm.vat_percentage || 15);
+      const svcPct = order.order_type === 'dine_in' ? parseFloat(sm.service_charge_percentage || 10) : 0;
+      const delFee = order.order_type === 'delivery' ? parseFloat(sm.delivery_fee || 0) : 0;
+      const newVat = (newSubtotal * vatPct) / 100;
+      const newSvc = (newSubtotal * svcPct) / 100;
+      const newTotal = newSubtotal + newVat + newSvc + delFee;
+
+      await connection.query(
+        'UPDATE orders SET subtotal = ?, vat_amount = ?, service_charge = ?, delivery_fee = ?, total_amount = ?, updated_at = NOW() WHERE id = ?',
+        [newSubtotal, newVat, newSvc, delFee, newTotal, id]
+      );
+
+      // Update delivery due_amount if delivery order
+      if (order.order_type === 'delivery') {
+        const [ddRows] = await connection.query(
+          'SELECT advance_payment FROM delivery_details WHERE order_id = ?', [id]
+        );
+        if (ddRows[0]) {
+          const newDue = Math.max(0, newTotal - parseFloat(ddRows[0].advance_payment));
+          await connection.query(
+            'UPDATE delivery_details SET due_amount = ?, updated_at = NOW() WHERE order_id = ?',
+            [newDue, id]
+          );
+        }
+      }
+
+      return { newSubtotal, newVat, newSvc, newTotal };
+    });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to('kitchen').emit('kitchen-update', { action: 'order-modified', orderId: parseInt(id) });
+      io.to(`order-${id}`).emit('order-update', { orderId: parseInt(id), action: 'items-modified' });
+    }
+
+    await logManualAudit(
+      req.user.id, 'update_items', 'orders', parseInt(id),
+      null, { add_count: add_items.length, remove_count: remove_item_ids.length },
+      req.ip, req.headers['user-agent']
+    );
+
+    const updatedOrder = await findOne('orders', { id });
+    res.json({ message: 'Order items updated successfully', order: updatedOrder, totals: result });
+
+  } catch (error) {
+    console.error('Edit order items error:', error);
+    res.status(400).json({ error: error.message || 'Failed to update order items', code: 'ORDER_EDIT_FAILED' });
+  }
+});
+
 // Update order status
 router.patch('/:id/status', validateId, async (req, res) => {
   try {
@@ -615,33 +800,54 @@ router.patch('/:id/status', validateId, async (req, res) => {
       }
     }
     
-    // Update order items status
+    // Handle cancellation side effects
     if (status === 'cancelled') {
+      // C-5: Restore inventory for all non-cancelled items before marking them cancelled
+      const activeItems = await findMany('order_items', { order_id: id });
+      for (const item of activeItems) {
+        if (item.status !== 'cancelled') {
+          await query(
+            'UPDATE food_inventory SET current_stock = current_stock + ?, last_updated = NOW() WHERE food_item_id = ?',
+            [item.quantity, item.food_item_id]
+          );
+        }
+      }
+
       await update('order_items', { status: 'cancelled' }, { order_id: id });
       await update('kitchen_queue', { status: 'cancelled' }, { order_id: id });
+
+      // C-6: Sync delivery state when order is cancelled
+      if (order.order_type === 'delivery') {
+        await update('delivery_details', {
+          delivery_status: 'cancelled',
+          updated_at: new Date()
+        }, { order_id: id });
+      }
     }
     
-    // Emit real-time updates
+    // C-3: Null-guard io before emitting (io may be null if Socket.IO failed to initialise)
     const io = req.app.get('io');
-    io.emit('order-status-update', { 
-      orderId: parseInt(id), 
-      oldStatus, 
-      newStatus: status,
-      updatedBy: req.user.username 
-    });
-    
-    io.to(`order-${id}`).emit('order-update', { 
-      orderId: parseInt(id), 
-      status,
-      updatedBy: req.user.username 
-    });
-    
-    if (status === 'preparing' || status === 'ready') {
-      io.to('kitchen').emit('kitchen-update', { 
-        action: 'status-change', 
+    if (io) {
+      io.emit('order-status-update', { 
         orderId: parseInt(id), 
-        status 
+        oldStatus, 
+        newStatus: status,
+        updatedBy: req.user.username 
       });
+      
+      io.to(`order-${id}`).emit('order-update', { 
+        orderId: parseInt(id), 
+        status,
+        updatedBy: req.user.username 
+      });
+      
+      if (status === 'preparing' || status === 'ready') {
+        io.to('kitchen').emit('kitchen-update', { 
+          action: 'status-change', 
+          orderId: parseInt(id), 
+          status 
+        });
+      }
     }
     
     // Log audit

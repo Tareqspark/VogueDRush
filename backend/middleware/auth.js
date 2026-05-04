@@ -143,7 +143,9 @@ const requireAdmin = requireRole('admin');
 // Refresh access token with rotation
 const refreshToken = async (req, res) => {
   try {
-    const { refreshToken, sessionToken } = req.body;
+    // Accept tokens from request body OR httpOnly cookies (C-1 fix)
+    const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
+    const sessionToken = req.body.sessionToken || req.cookies?.sessionToken;
     
     if (!refreshToken || !sessionToken) {
       return res.status(401).json({ 
@@ -231,7 +233,7 @@ const refreshToken = async (req, res) => {
       // Remove sensitive data
       delete userData.password_hash;
       
-      // Set httpOnly cookies
+      // Set httpOnly cookies (C-1 fix: include sessionToken cookie)
       res.cookie('accessToken', tokens.accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -240,6 +242,13 @@ const refreshToken = async (req, res) => {
       });
       
       res.cookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      res.cookie('sessionToken', tokens.sessionToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
@@ -266,7 +275,9 @@ const refreshToken = async (req, res) => {
 // Logout and blacklist tokens
 const logout = async (req, res) => {
   try {
-    const { userId, sessionToken } = req.body;
+    const { userId } = req.body;
+    // Accept sessionToken from body or httpOnly cookie (C-1 fix)
+    const sessionToken = req.body.sessionToken || req.cookies?.sessionToken;
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!userId || !sessionToken) {
@@ -320,6 +331,7 @@ const logout = async (req, res) => {
     // Clear cookies
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
+    res.clearCookie('sessionToken');
     
     res.json({ message: 'Logout successful' });
     
@@ -365,6 +377,19 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
+// M-8: Purge expired rows from token_blacklist and user_sessions to prevent unbounded table growth.
+// Called on a schedule from server.js.
+const cleanupExpiredTokens = async () => {
+  try {
+    const { query: dbQuery } = require('../config/database');
+    await dbQuery('DELETE FROM token_blacklist WHERE expires_at < NOW()');
+    await dbQuery('DELETE FROM user_sessions WHERE expires_at < NOW() AND is_active = 0');
+    console.log('[auth cleanup] Expired tokens and sessions purged');
+  } catch (error) {
+    console.error('[auth cleanup] Cleanup failed:', error.message);
+  }
+};
+
 module.exports = {
   generateTokens,
   authenticateToken,
@@ -372,5 +397,6 @@ module.exports = {
   requireAdmin,
   refreshToken,
   logout,
-  optionalAuth
+  optionalAuth,
+  cleanupExpiredTokens
 };

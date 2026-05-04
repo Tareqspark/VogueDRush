@@ -26,6 +26,22 @@ const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Changelog = lazy(() => import('./pages/Changelog'));
+const QaGuide = lazy(() => import('./pages/QaGuide'));
+const QaLinkedPage = lazy(() => import('./pages/QaLinkedPage'));
+
+// ERP Module Pages
+const Inventory            = lazy(() => import('./pages/Inventory'));
+const Purchase             = lazy(() => import('./pages/Purchase'));
+const Suppliers            = lazy(() => import('./pages/Suppliers'));
+const CRM                  = lazy(() => import('./pages/CRM'));
+const Expenses             = lazy(() => import('./pages/Expenses'));
+const Accounting           = lazy(() => import('./pages/Accounting'));
+const HR                   = lazy(() => import('./pages/HR'));
+const QROrdering           = lazy(() => import('./pages/QROrdering'));
+const Fleet                = lazy(() => import('./pages/Fleet'));
+const AdvancedReservations = lazy(() => import('./pages/AdvancedReservations'));
+const Branches             = lazy(() => import('./pages/Branches'));
+const BusinessIntelligence = lazy(() => import('./pages/BusinessIntelligence'));
 
 // Create React Query client with enhanced configuration
 const queryClient = new QueryClient({
@@ -309,6 +325,140 @@ const AppContent = () => {
                       <ProtectedRoute>
                         <Layout>
                           <Changelog />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* QA Guide - accessible to all roles */}
+                  <Route
+                    path="/qa-guide"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <QaGuide />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* QA linked module placeholder routes */}
+                  <Route
+                    path="/inventory/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Inventory />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/purchase/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Purchase />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/suppliers/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Suppliers />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/crm/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <CRM />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/expenses/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Expenses />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Accounting />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/hr/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <HR />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/qr-ordering/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <QROrdering />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/fleet/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Fleet />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/advanced-reservations/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <AdvancedReservations />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/branches/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <Branches />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/bi/*"
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <Layout>
+                          <BusinessIntelligence />
                         </Layout>
                       </ProtectedRoute>
                     }

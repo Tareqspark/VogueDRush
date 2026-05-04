@@ -52,7 +52,7 @@ router.get('/sales', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN o.order_type = 'delivery' THEN 1 END) as delivery_count,
         COUNT(CASE WHEN o.order_type = 'direct' THEN 1 END) as direct_count
       FROM orders o
-      WHERE o.status IN ('done', 'cancelled') ${dateFilter ? 'AND ' + dateFilter.substring(6) : ''}
+      WHERE o.status = 'done' ${dateFilter ? 'AND ' + dateFilter.substring(6) : ''}
       GROUP BY ${groupBy}
       ORDER BY period DESC
       LIMIT 100
