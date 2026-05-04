@@ -57,7 +57,7 @@ const RecentOrders = () => {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono font-black text-sky-600 text-xs">{order.order_number}</span>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${STATUS_COLORS[order.status]}`}>{order.status}</span>
-                  <span className="text-xs text-slate-400 capitalize">{order.order_type.replace('_', ' ')}</span>
+                  <span className="text-xs text-slate-400 capitalize">{order.order_type === 'direct' ? 'takeway' : order.order_type.replace('_', ' ')}</span>
                 </div>
                 <div className="mt-0.5 flex items-center gap-3 text-xs text-slate-400">
                   <span>{order.waiter_name || 'Unknown'}</span>

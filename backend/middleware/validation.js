@@ -66,13 +66,21 @@ const validateOrder = [
     .isInt({ min: 1 })
     .withMessage('Table ID is required for dine-in orders'),
   body('customer_name')
-    .if(body('order_type').equals('delivery'))
+    .if(body('order_type').isIn(['delivery', 'direct']))
     .notEmpty()
-    .withMessage('Customer name is required for delivery orders'),
+    .withMessage('Customer name is required for delivery and takeaway orders'),
   body('customer_phone')
-    .if(body('order_type').equals('delivery'))
+    .if(body('order_type').isIn(['delivery', 'direct']))
     .isMobilePhone()
-    .withMessage('Valid customer phone is required for delivery orders'),
+    .withMessage('Valid customer phone is required for delivery and takeaway orders'),
+  body('delivery_details.order_time')
+    .if(body('order_type').equals('delivery'))
+    .matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
+    .withMessage('Order time is required for delivery orders (HH:MM)'),
+  body('delivery_details.delivery_time')
+    .if(body('order_type').equals('delivery'))
+    .matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
+    .withMessage('Delivery time is required for delivery orders (HH:MM)'),
   body('items')
     .isArray({ min: 1 })
     .withMessage('Order must contain at least one item'),
@@ -106,7 +114,7 @@ const validateFoodItem = [
     .isFloat({ min: 0 })
     .withMessage('Price must be a positive number'),
   body('promotional_price')
-    .optional()
+    .optional({ checkFalsy: true, nullable: true })
     .isFloat({ min: 0 })
     .withMessage('Promotional price must be a positive number'),
   body('vat_rate')

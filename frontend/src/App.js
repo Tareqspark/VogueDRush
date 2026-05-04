@@ -1,5 +1,5 @@
-import React, { useState, Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, Suspense, lazy, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
@@ -87,6 +87,17 @@ const ProtectedRoute = ({ children, requiredRole }) => {
   return children;
 };
 
+const RouteDataReloader = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Refresh data whenever user switches pages.
+    queryClient.invalidateQueries();
+  }, [location.pathname]);
+
+  return null;
+};
+
 // Main App Content
 const AppContent = () => {
   const { user, loading } = useAuth();
@@ -136,6 +147,7 @@ const AppContent = () => {
   return (
     <Router>
       <SocketProvider>
+        <RouteDataReloader />
         <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 50%, #FEF9C3 100%)', backgroundAttachment: 'fixed' }}>
           {/* Mobile sidebar backdrop */}
           {sidebarOpen && (
@@ -154,7 +166,7 @@ const AppContent = () => {
             <Header onMenuClick={() => setSidebarOpen(true)} />
 
             {/* Page content */}
-            <main className="p-4 lg:p-6 min-h-[calc(100vh-4rem)]">
+            <main className="p-4 lg:p-6 min-h-[calc(100vh-4rem)]" key={typeof window !== 'undefined' ? window.location.pathname : 'app'}>
               <Suspense fallback={<PageLoadingFallback />}>
                 <Routes>
                   {/* Dashboard - accessible to all roles */}

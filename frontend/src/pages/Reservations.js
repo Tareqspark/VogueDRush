@@ -215,7 +215,7 @@ function NewReservationModal({ api, onClose, onCreated }) {
               <label className="label">Table (optional)</label>
               <select className="select" {...f('table_id')}>
                 <option value="">Auto-assign</option>
-                {tables.map(t => <option key={t.id} value={t.id}>Table {t.table_number} (cap {t.capacity})</option>)}
+                {tables.map(t => <option key={t.id} value={t.id}>Table {t.table_number}</option>)}
               </select>
             </div>
           </div>
@@ -228,7 +228,6 @@ function NewReservationModal({ api, onClose, onCreated }) {
 }
 
 function ReservationOrderModal({ api, reservation, onClose, onCompleted }) {
-  const queryClient = useQueryClient();
   const [step, setStep] = useState(reservation.pre_order_id ? 'order' : 'menu');
   const [orderId, setOrderId] = useState(reservation.pre_order_id || null);
   const [cart, setCart] = useState([]);

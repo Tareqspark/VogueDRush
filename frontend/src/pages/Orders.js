@@ -17,7 +17,12 @@ const STATUS_COLORS = {
   cancelled: 'bg-rose-50 text-rose-600 border-rose-200',
 };
 
-const TYPE_LABELS = { dine_in: 'Dine In', delivery: 'Delivery', direct: 'Direct' };
+const TYPE_LABELS = { dine_in: 'Dine In', delivery: 'Delivery', direct: 'Takeway' };
+const TYPE_CARD_STYLES = {
+  dine_in: 'border-l-sky-400 bg-sky-50/20',
+  delivery: 'border-l-amber-400 bg-amber-50/20',
+  direct: 'border-l-emerald-400 bg-emerald-50/20',
+};
 
 export default function Orders() {
   const { api, user } = useAuth();
@@ -42,25 +47,25 @@ export default function Orders() {
   );
 
   // ── Status update ──────────────────────────────────────────────
-  const updateStatus = async (id, status) => {
+  const updateStatus = async (id, status, reason) => {
     try {
-      await api.patch(`/orders/${id}/status`, { status });
+      await api.patch(`/orders/${id}/status`, { status, reason });
       toast.success(`Order marked as ${status}`);
       queryClient.invalidateQueries('orders');
       queryClient.invalidateQueries(['order-detail', id]);
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Failed to update');
+      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to update');
     }
   };
 
-  const printBill = async (id) => {
+  const printBill = async (id, payload = {}) => {
     try {
-      const res = await api.post(`/orders/${id}/bill`);
+      const res = await api.post(`/orders/${id}/bill`, payload);
       queryClient.invalidateQueries('orders');
       queryClient.invalidateQueries(['order-detail', id]);
       return res.data;
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Failed to print bill');
+      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to print bill');
       return null;
     }
   };
@@ -92,7 +97,7 @@ export default function Orders() {
           <option value="">All Types</option>
           <option value="dine_in">Dine In</option>
           <option value="delivery">Delivery</option>
-          <option value="direct">Direct</option>
+          <option value="direct">Takeway</option>
         </select>
       </div>
 
@@ -109,7 +114,7 @@ export default function Orders() {
           {orders.map(order => (
             <div key={order.id}
               onClick={() => setSelectedOrder(order.id)}
-              className="card p-4 cursor-pointer hover:shadow-card-hover hover:border-sky-200 transition-all group">
+              className={`card p-4 cursor-pointer hover:shadow-card-hover transition-all group border-l-4 ${TYPE_CARD_STYLES[order.order_type] || 'border-l-slate-200'}`}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-3">
                   <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
@@ -191,6 +196,10 @@ export default function Orders() {
 function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, userRole, userId }) {
   const { order, items } = detail;
   const [printing, setPrinting] = useState(false);
+  const [showBillPopup, setShowBillPopup] = useState(false);
+  const [discountAmount, setDiscountAmount] = useState('0');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentLast4, setPaymentLast4] = useState('');
 
   const activeItems = items.filter(i => i.status !== 'cancelled');
   const canEdit = !order.bill_printed && !['done', 'cancelled'].includes(order.status)
@@ -200,14 +209,25 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
   const nextLabel = { pending: 'Preparing', preparing: 'Ready', ready: 'Done' }[order.status];
 
   const handlePrint = async () => {
+    if (['card', 'bkash', 'nagad'].includes(paymentMethod) && !/^\d{4}$/.test(paymentLast4)) {
+      toast.error('Enter last 4 digits for selected payment method');
+      return;
+    }
+
     setPrinting(true);
-    const data = await onPrintBill(order.id);
+    const data = await onPrintBill(order.id, {
+      discount_amount: parseFloat(discountAmount) || 0,
+      payment_method: paymentMethod,
+      payment_last4: ['card', 'bkash', 'nagad'].includes(paymentMethod) ? paymentLast4 : undefined,
+    });
     setPrinting(false);
     if (data) {
       const html = buildReceiptHTML(data);
       const w = window.open('', '_blank', 'width=380,height=650');
       if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
-      toast.success('Bill printed! Order is now locked.');
+      setShowBillPopup(false);
+      toast.success('Bill printed! Order auto-completed.');
+      onClose();
     }
   };
 
@@ -216,6 +236,22 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
     const html = buildReceiptHTML(data);
     const w = window.open('', '_blank', 'width=380,height=650');
     if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+  };
+
+  const handleMarkDone = async () => {
+    if (!order.bill_printed) {
+      setShowBillPopup(true);
+      return;
+    }
+    onUpdateStatus(order.id, 'done');
+    onClose();
+  };
+
+  const requestCancel = async () => {
+    const reason = window.prompt('Cancellation reason (required):');
+    if (!reason || !reason.trim()) return;
+    onUpdateStatus(order.id, 'cancelled', reason.trim());
+    onClose();
   };
 
   return (
@@ -275,7 +311,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
             )}
 
             {!order.bill_printed && order.status !== 'cancelled' && (userRole === 'admin' || order.waiter_id === userId) && (
-              <button onClick={handlePrint} disabled={printing}
+              <button onClick={() => setShowBillPopup(true)} disabled={printing}
                 className="btn btn-primary flex items-center gap-1.5 disabled:opacity-50">
                 {printing ? <LoadingSpinner size="sm" /> : <PrinterIcon className="h-4 w-4" />}
                 Print Bill
@@ -289,18 +325,62 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
             )}
 
             {!['done','cancelled'].includes(order.status) && nextStatus && (
-              <button onClick={() => { onUpdateStatus(order.id, nextStatus); onClose(); }}
+              <button onClick={() => {
+                if (nextStatus === 'done') {
+                  handleMarkDone();
+                } else {
+                  onUpdateStatus(order.id, nextStatus);
+                  onClose();
+                }
+              }}
                 className="btn btn-primary flex-1">
                 Mark as {nextLabel}
               </button>
             )}
 
-            {(userRole === 'admin' || order.waiter_id === userId) && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
-              <button onClick={() => { onUpdateStatus(order.id, 'cancelled'); onClose(); }} className="btn btn-error px-4">
+            {userRole === 'admin' && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
+              <button onClick={requestCancel} className="btn btn-error px-4">
                 Cancel
               </button>
             )}
           </div>
+
+          {order.cancellation_reason && (
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-sm text-rose-700">
+              <span className="font-bold">Cancel Reason: </span>{order.cancellation_reason}
+            </div>
+          )}
+
+          {showBillPopup && (
+            <div className="mt-2 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+              <h3 className="font-bold text-slate-700 text-sm">Finalize Bill</h3>
+              <div>
+                <label className="label">Discount Amount</label>
+                <input className="input" type="number" min="0" step="0.01" value={discountAmount} onChange={(e) => setDiscountAmount(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Payment Method</label>
+                <select className="select" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="bkash">bKash</option>
+                  <option value="nagad">Nagad</option>
+                </select>
+              </div>
+              {['card', 'bkash', 'nagad'].includes(paymentMethod) && (
+                <div>
+                  <label className="label">Last 4 Digits</label>
+                  <input className="input" maxLength={4} value={paymentLast4} onChange={(e) => setPaymentLast4(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="1234" />
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button className="btn btn-secondary flex-1" onClick={() => setShowBillPopup(false)}>Close</button>
+                <button className="btn btn-primary flex-1" onClick={handlePrint} disabled={printing}>
+                  {printing ? <LoadingSpinner size="sm" /> : 'Print & Complete'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -567,6 +647,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [orderTime, setOrderTime] = useState(() => new Date().toTimeString().slice(0, 5));
+  const [deliveryTime, setDeliveryTime] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [cart, setCart] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -635,23 +717,33 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
 
   const submit = async () => {
     if (cart.length === 0) return toast.error('Add items to cart');
-    if (orderType === 'delivery' && (!customerName || !customerPhone || !address)) return toast.error('Fill customer details');
+    if ((orderType === 'delivery' || orderType === 'direct') && (!customerName || !customerPhone)) {
+      return toast.error('Customer name and phone are required');
+    }
+    if (orderType === 'delivery' && (!address || !orderTime || !deliveryTime)) {
+      return toast.error('Delivery requires address, order time and delivery time');
+    }
     setSubmitting(true);
     try {
       const payload = {
         order_type: orderType,
         table_id: orderType === 'dine_in' ? selectedTable.id : undefined,
-        customer_name: orderType === 'delivery' ? customerName : undefined,
-        customer_phone: orderType === 'delivery' ? customerPhone : undefined,
+        customer_name: (orderType === 'delivery' || orderType === 'direct') ? customerName : undefined,
+        customer_phone: (orderType === 'delivery' || orderType === 'direct') ? customerPhone : undefined,
         special_instructions: specialInstructions || undefined,
         items: cart.map(c => ({ food_item_id: c.id, quantity: c.qty })),
-        delivery_details: orderType === 'delivery' ? { customer_address: address, delivery_phone: customerPhone } : undefined,
+        delivery_details: orderType === 'delivery' ? {
+          customer_address: address,
+          delivery_phone: customerPhone,
+          order_time: orderTime,
+          delivery_time: deliveryTime,
+        } : undefined,
       };
       await api.post('/orders', payload);
       toast.success('Order created!');
       onCreated();
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Failed to create order');
+      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to create order');
     } finally {
       setSubmitting(false);
     }
@@ -686,7 +778,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">⚡</span>
                   <div className="flex-1">
-                    <div className="font-black text-slate-800 group-hover:text-emerald-700">Direct</div>
+                    <div className="font-black text-slate-800 group-hover:text-emerald-700">Takeway</div>
                     <div className="text-xs text-slate-400">Counter / takeaway order</div>
                   </div>
                   <span className="text-slate-300 group-hover:text-emerald-400 text-lg">→</span>
@@ -747,7 +839,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                         key={table.id}
                         onClick={() => handleSelectTable(table)}
                         disabled={!isAvailable}
-                        title={`Table ${table.table_number} · ${table.capacity} seats · ${table.status}`}
+                        title={`Table ${table.table_number} · ${table.status}`}
                         className={`relative rounded-xl py-3 px-1 border-2 flex flex-col items-center gap-0.5 transition-all
                           ${ isAvailable
                               ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-500 hover:scale-105 active:scale-95 cursor-pointer shadow-sm'
@@ -757,9 +849,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                           }`}
                       >
                         <span className="font-black text-sm leading-none">{table.table_number}</span>
-                        <span className="text-[9px] font-semibold capitalize leading-none mt-1 opacity-70">
-                          {isAvailable ? `${table.capacity}p` : table.status}
-                        </span>
+                        <span className="text-[9px] font-semibold capitalize leading-none mt-1 opacity-70">{table.status}</span>
                       </button>
                     );
                   })}
@@ -803,16 +893,24 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   {orderType === 'dine_in' ? `Table ${selectedTable?.table_number}` : TYPE_LABELS[orderType]}
                 </h2>
                 {orderType === 'dine_in' && selectedTable && (
-                  <p className="text-xs text-slate-400">{selectedTable.location} · {selectedTable.capacity} seats</p>
+                  <p className="text-xs text-slate-400">{selectedTable.location}</p>
                 )}
               </div>
               <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
             </div>
-            {orderType === 'delivery' && (
+            {(orderType === 'delivery' || orderType === 'direct') && (
               <div className="space-y-2 mb-3">
                 <input className="input" placeholder="Customer Name *" value={customerName} onChange={e => setCustomerName(e.target.value)} />
                 <input className="input" placeholder="Phone *" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
-                <input className="input" placeholder="Delivery Address *" value={address} onChange={e => setAddress(e.target.value)} />
+                {orderType === 'delivery' && (
+                  <>
+                    <input className="input" placeholder="Delivery Address *" value={address} onChange={e => setAddress(e.target.value)} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className="input" type="time" value={orderTime} onChange={e => setOrderTime(e.target.value)} />
+                      <input className="input" type="time" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} />
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <div className="relative">

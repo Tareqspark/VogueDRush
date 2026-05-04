@@ -165,11 +165,15 @@ function ItemModal({ api, categories, item, onClose, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        promotional_price: form.promotional_price === '' ? undefined : form.promotional_price,
+      };
       if (item) {
-        await api.put(`/menu/items/${item.id}`, form);
+        await api.put(`/menu/items/${item.id}`, payload);
         toast.success('Item updated');
       } else {
-        await api.post('/menu/items', form);
+        await api.post('/menu/items', payload);
         toast.success('Item created');
       }
       onSaved();

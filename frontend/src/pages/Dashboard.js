@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
+import { useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import {
   CurrencyDollarIcon,
   ShoppingCartIcon,
@@ -20,7 +22,10 @@ import TodayReservations from '../components/Dashboard/TodayReservations';
 const Dashboard = () => {
   const { user, api } = useAuth();
   const { isConnected } = useSocket();
+  const navigate = useNavigate();
   const [selectedPeriod] = useState('today');
+  const [tab, setTab] = useState('overview');
+  const [drill, setDrill] = useState(null);
 
   // Fetch dashboard statistics
   const {
@@ -114,6 +119,47 @@ const Dashboard = () => {
     }
   );
 
+  const { data: menuPerfData } = useQuery(
+    ['dash-menu-performance'],
+    async () => {
+      const end = new Date().toISOString().split('T')[0];
+      const start = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      const response = await api.get('/reports/menu-performance', { params: { start_date: start, end_date: end, limit: 8 } });
+      return response.data;
+    },
+    { refetchInterval: 60000 }
+  );
+
+  const { data: drillOrders } = useQuery(
+    ['dash-drill-orders', drill],
+    async () => {
+      const params = { limit: 20 };
+      if (drill?.kind === 'status') params.status = drill.value;
+      if (drill?.kind === 'type') params.order_type = drill.value;
+      const response = await api.get('/orders', { params });
+      return response.data;
+    },
+    { enabled: !!drill }
+  );
+
+  const { data: receiptData } = useQuery(
+    ['dash-receipts', user?.role],
+    async () => {
+      const response = await api.get('/orders/receipts/history', { params: { limit: 50 } });
+      return response.data;
+    },
+    { enabled: user?.role === 'admin', refetchInterval: 60000 }
+  );
+
+  const { data: transactionData } = useQuery(
+    ['dash-transactions', user?.role],
+    async () => {
+      const response = await api.get('/orders/transactions/report', { params: { limit: 50 } });
+      return response.data;
+    },
+    { enabled: user?.role === 'admin', refetchInterval: 60000 }
+  );
+
   // Listen for real-time updates
   useEffect(() => {
     // Socket event listeners would be set up here
@@ -140,6 +186,14 @@ const Dashboard = () => {
   const kitchenWorkload = kitchenStats?.currentWorkload || {};
   const revenueTrend = 5.2;
   const ordersTrend = -2.1;
+  const soldByName = (menuPerfData?.item_performance || []).slice(0, 7).map(item => ({
+    name: item.item_name,
+    sold: parseInt(item.total_quantity || 0, 10),
+  }));
+  const soldByCategory = (menuPerfData?.category_performance || []).slice(0, 7).map(cat => ({
+    name: cat.category_name,
+    sold: parseInt(cat.total_quantity || 0, 10),
+  }));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -200,6 +254,14 @@ const Dashboard = () => {
         />
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setTab('overview')} className={`btn btn-sm ${tab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}>Overview</button>
+        {user?.role === 'admin' && <button onClick={() => setTab('receipts')} className={`btn btn-sm ${tab === 'receipts' ? 'btn-primary' : 'btn-secondary'}`}>Receipt Tab</button>}
+        {user?.role === 'admin' && <button onClick={() => setTab('transactions')} className={`btn btn-sm ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`}>Transaction Report</button>}
+      </div>
+
+      {tab === 'overview' && (
+        <>
       {/* ── Main Content ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">
@@ -228,7 +290,8 @@ const Dashboard = () => {
             {statusStats.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-4">No data yet</p>
             ) : statusStats.map((s) => (
-              <div key={s.status} className="flex items-center justify-between">
+              <button key={s.status} onClick={() => setDrill({ kind: 'status', value: s.status })}
+                className="w-full text-left flex items-center justify-between hover:bg-slate-50 rounded-lg px-2 py-1 transition-colors">
                 <div className="flex items-center gap-2.5">
                   <span className={`status-badge status-${s.status}`}>{s.status}</span>
                 </div>
@@ -236,7 +299,7 @@ const Dashboard = () => {
                   <span className="text-sm font-bold text-slate-700">{s.count}</span>
                   <span className="text-xs text-slate-400">৳{(s.total_revenue || 0).toLocaleString()}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -250,22 +313,109 @@ const Dashboard = () => {
             {typeStats.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-4">No data yet</p>
             ) : typeStats.map((t) => (
-              <div key={t.order_type} className="flex items-center justify-between">
+              <button key={t.order_type} onClick={() => setDrill({ kind: 'type', value: t.order_type })}
+                className="w-full text-left flex items-center justify-between hover:bg-slate-50 rounded-lg px-2 py-1 transition-colors">
                 <div className="flex items-center gap-2.5">
                   {t.order_type === 'dine_in' && <RectangleGroupIcon className="h-4 w-4 text-sky-500" />}
                   {t.order_type === 'delivery' && <TruckIcon className="h-4 w-4 text-amber-500" />}
                   {t.order_type === 'direct' && <UsersIcon className="h-4 w-4 text-emerald-500" />}
-                  <span className="text-sm text-slate-600 capitalize">{t.order_type.replace('_', ' ')}</span>
+                  <span className="text-sm text-slate-600 capitalize">{t.order_type === 'direct' ? 'takeway' : t.order_type.replace('_', ' ')}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-bold text-slate-700">{t.count}</span>
                   <span className="text-xs text-slate-400">৳{(t.total_revenue || 0).toLocaleString()}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
       </div>
+
+      {drill && (
+        <div className="card p-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-black text-slate-800">Drill View: {drill.kind} = {drill.value}</h3>
+            <button className="btn btn-secondary btn-sm" onClick={() => setDrill(null)}>Close</button>
+          </div>
+          <div className="space-y-2">
+            {(drillOrders?.orders || []).map((o) => (
+              <button key={o.id} onClick={() => navigate('/orders')} className="w-full text-left rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-bold text-slate-700">{o.order_number}</div>
+                  <div className="text-xs text-slate-500 capitalize">{o.order_type === 'direct' ? 'Takeway' : o.order_type}</div>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">Status: {o.status} {o.cancellation_reason ? `| Cancel Note: ${o.cancellation_reason}` : ''}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card p-6">
+          <h3 className="text-sm font-bold text-slate-800 mb-4">Items Sold By Name</h3>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={soldByName} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="name" angle={-25} textAnchor="end" height={60} tick={{ fontSize: 11, fill: '#64748b' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+              <Tooltip />
+              <Bar dataKey="sold" fill="#0284C7" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="card p-6">
+          <h3 className="text-sm font-bold text-slate-800 mb-4">Items Sold By Category</h3>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={soldByCategory} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="name" angle={-20} textAnchor="end" height={60} tick={{ fontSize: 11, fill: '#64748b' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+              <Tooltip />
+              <Bar dataKey="sold" fill="#10B981" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      </>
+      )}
+
+      {tab === 'receipts' && user?.role === 'admin' && (
+        <div className="card p-6">
+          <h3 className="text-sm font-black text-slate-800 mb-4">Receipt History</h3>
+          <div className="space-y-2">
+            {(receiptData?.receipts || []).map((r) => (
+              <div key={r.id} className="border border-slate-100 rounded-lg p-3">
+                <div className="flex justify-between items-center gap-2">
+                  <div className="font-bold text-slate-700">{r.order_number}</div>
+                  <div className="text-xs text-slate-500">{new Date(r.bill_printed_at).toLocaleString()}</div>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">{r.order_type === 'direct' ? 'Takeway' : r.order_type} · {r.payment_method || '-'} {r.transaction_id ? `(${r.transaction_id})` : ''}</div>
+                <div className="text-xs text-slate-500">Discount: ৳{parseFloat(r.discount_amount || 0).toFixed(2)} · Total: ৳{parseFloat(r.total_amount || 0).toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'transactions' && user?.role === 'admin' && (
+        <div className="card p-6">
+          <h3 className="text-sm font-black text-slate-800 mb-4">Transaction Report</h3>
+          <div className="space-y-2">
+            {(transactionData?.transactions || []).map((t) => (
+              <div key={t.id} className="border border-slate-100 rounded-lg p-3">
+                <div className="flex justify-between items-center gap-2">
+                  <div className="font-bold text-slate-700">{t.order_number}</div>
+                  <div className="text-xs text-slate-500">{new Date(t.created_at).toLocaleString()}</div>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">Method: {t.transaction_id?.startsWith('NAGAD-') ? 'nagad' : t.payment_method} {t.transaction_id ? `(${t.transaction_id})` : ''}</div>
+                <div className="text-xs text-slate-500">Amount: ৳{parseFloat(t.amount || 0).toFixed(2)} · Discount: ৳{parseFloat(t.discount_amount || 0).toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

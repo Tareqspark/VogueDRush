@@ -110,7 +110,6 @@ export default function Tables() {
               <div className="text-2xl font-black mb-1">{table.table_number}</div>
               <div className={`text-xs font-bold capitalize px-2 py-0.5 rounded-full border inline-block ${STATUS_BADGES[table.status]}`}>{table.status}</div>
               <div className="text-xs mt-2 opacity-60 font-medium">{table.location}</div>
-              <div className="text-xs opacity-60">{table.capacity} seats</div>
             </button>
           ))}
         </div>
@@ -149,10 +148,6 @@ function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-              <div className="text-slate-400 text-xs font-semibold">Capacity</div>
-              <div className="font-black text-slate-800 mt-0.5">{table.capacity} seats</div>
-            </div>
             {table.location && (
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
                 <div className="text-slate-400 text-xs font-semibold">Location</div>
@@ -200,14 +195,14 @@ function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
 }
 
 function AddTableModal({ api, onClose, onCreated }) {
-  const [form, setForm] = useState({ table_number: '', capacity: 4, location: '' });
+  const [form, setForm] = useState({ table_number: '', location: '' });
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post('/tables', form);
+      await api.post('/tables', { ...form, capacity: 4 });
       toast.success('Table added');
       onCreated();
     } catch (err) {
@@ -227,7 +222,6 @@ function AddTableModal({ api, onClose, onCreated }) {
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div><label className="label">Table Number *</label><input className="input" required value={form.table_number} onChange={e => setForm(f => ({...f, table_number: e.target.value}))} placeholder="e.g. T9" /></div>
-          <div><label className="label">Capacity *</label><input className="input" type="number" min={1} max={50} required value={form.capacity} onChange={e => setForm(f => ({...f, capacity: e.target.value}))} /></div>
           <div><label className="label">Location</label><input className="input" value={form.location} onChange={e => setForm(f => ({...f, location: e.target.value}))} placeholder="e.g. Ground Floor" /></div>
           <button type="submit" disabled={submitting} className="btn btn-primary w-full justify-center">{submitting ? <LoadingSpinner size="sm" /> : 'Add Table'}</button>
         </form>

@@ -114,7 +114,17 @@ router.get('/', async (req, res) => {
     const ordersQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
              t.table_number, t.location as table_location,
-             o.bill_printed, o.bill_printed_at
+             o.bill_printed, o.bill_printed_at,
+             (
+               SELECT JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.reason'))
+               FROM audit_logs a
+               WHERE a.table_name = 'orders'
+                 AND a.record_id = o.id
+                 AND a.action = 'update_status'
+                 AND JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.status')) = 'cancelled'
+               ORDER BY a.created_at DESC
+               LIMIT 1
+             ) AS cancellation_reason
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
@@ -157,7 +167,17 @@ router.get('/:id', validateId, async (req, res) => {
     const orderQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
              t.table_number, t.location as table_location,
-             o.bill_printed, o.bill_printed_at
+             o.bill_printed, o.bill_printed_at,
+             (
+               SELECT JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.reason'))
+               FROM audit_logs a
+               WHERE a.table_name = 'orders'
+                 AND a.record_id = o.id
+                 AND a.action = 'update_status'
+                 AND JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.status')) = 'cancelled'
+               ORDER BY a.created_at DESC
+               LIMIT 1
+             ) AS cancellation_reason
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
@@ -264,8 +284,8 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
         order_type,
         table_id: order_type === 'dine_in' ? (table_id || null) : null,
         waiter_id: req.user.id,
-        customer_name: order_type === 'delivery' ? (customer_name || null) : null,
-        customer_phone: order_type === 'delivery' ? (customer_phone || null) : null,
+        customer_name: ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
+        customer_phone: ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
         status: 'pending',
         special_instructions: special_instructions || null,
         ...totals
@@ -341,13 +361,19 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       
       // Insert delivery details if applicable
       if (order_type === 'delivery' && delivery_details) {
+        const deliveryNotes = [
+          delivery_details.delivery_notes || null,
+          delivery_details.order_time ? `Order Time: ${delivery_details.order_time}` : null,
+          delivery_details.delivery_time ? `Delivery Time: ${delivery_details.delivery_time}` : null,
+        ].filter(Boolean).join(' | ') || null;
+
         const deliveryData = {
           order_id: orderId,
           customer_address: delivery_details.customer_address || null,
           delivery_phone: delivery_details.delivery_phone || customer_phone || null,
           advance_payment: delivery_details.advance_payment || 0.00,
           due_amount: delivery_details.due_amount || 0.00,
-          delivery_notes: delivery_details.delivery_notes || null
+          delivery_notes: deliveryNotes
         };
         
         const [deliveryResult] = await connection.query(
@@ -438,9 +464,14 @@ router.patch('/:id/status', validateId, async (req, res) => {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    // Check permissions based on status
-    if (status === 'cancelled' && req.user.role !== 'admin' && order.waiter_id !== req.user.id) {
-      return res.status(403).json({ error: 'Only admin or order creator can cancel orders' });
+    // Cancellation policy: only admin can cancel, and reason is mandatory
+    if (status === 'cancelled') {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only admin can cancel orders' });
+      }
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({ error: 'Cancellation reason is required' });
+      }
     }
     
     const oldStatus = order.status;
@@ -751,6 +782,18 @@ router.put('/:id/items', validateId, async (req, res) => {
 router.post('/:id/bill', validateId, async (req, res) => {
   try {
     const { id } = req.params;
+    const { discount_amount = 0, payment_method = 'cash', payment_last4 } = req.body || {};
+
+    const validMethods = ['cash', 'card', 'bkash', 'nagad'];
+    if (!validMethods.includes(payment_method)) {
+      return res.status(400).json({ error: 'Invalid payment method' });
+    }
+    if (['card', 'bkash', 'nagad'].includes(payment_method)) {
+      const last4 = String(payment_last4 || '');
+      if (!/^\d{4}$/.test(last4)) {
+        return res.status(400).json({ error: 'Last 4 digits are required for card/bkash/nagad' });
+      }
+    }
 
     const order = await findOne('orders', { id });
     if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -763,12 +806,36 @@ router.post('/:id/bill', validateId, async (req, res) => {
       return res.status(400).json({ error: 'Cannot print bill for a cancelled order' });
     }
 
+    const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
+    const baseTotal = parseFloat(order.subtotal) + parseFloat(order.vat_amount) + parseFloat(order.service_charge);
+    const adjustedTotal = Math.max(0, baseTotal - safeDiscount);
+
     // Mark bill printed
     await update('orders', {
       bill_printed: true,
       bill_printed_at: new Date(),
+      discount_amount: safeDiscount,
+      total_amount: adjustedTotal,
+      status: 'done',
       updated_at: new Date()
     }, { id });
+
+    // Mark table available on completion
+    if (order.order_type === 'dine_in' && order.table_id) {
+      await update('tables', { status: 'available', updated_at: new Date() }, { id: order.table_id });
+    }
+
+    // Persist payment record (nagad is stored as bkash method with prefixed transaction id)
+    const storedMethod = payment_method === 'nagad' ? 'bkash' : payment_method;
+    const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
+    const txnPrefix = payment_method === 'nagad' ? 'NAGAD' : payment_method.toUpperCase();
+    await insert('payments', {
+      order_id: parseInt(id),
+      payment_method: storedMethod,
+      amount: adjustedTotal,
+      transaction_id: payment_last4 ? `${txnPrefix}${txnSuffix}` : null,
+      status: 'completed'
+    });
 
     // Fetch full bill data
     const { query: dbQuery } = require('../config/database');
@@ -796,6 +863,10 @@ router.post('/:id/bill', validateId, async (req, res) => {
       message: 'Bill printed successfully',
       order: updatedOrder,
       items,
+      payment: {
+        payment_method,
+        payment_last4: payment_last4 || null,
+      },
       restaurant: {
         name: settingsMap.restaurant_name || 'FoodPark',
         address: settingsMap.restaurant_address || '',
@@ -808,6 +879,89 @@ router.post('/:id/bill', validateId, async (req, res) => {
   } catch (error) {
     console.error('Print bill error:', error);
     res.status(500).json({ error: 'Failed to print bill' });
+  }
+});
+
+// Receipt history (admin management view)
+router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
+  try {
+    const { page = 1, limit = 100, start_date, end_date } = req.query;
+    const limitInt = parseInt(limit) || 100;
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    let whereClause = 'o.bill_printed = 1';
+    const values = [];
+
+    if (start_date) {
+      whereClause += ' AND DATE(o.bill_printed_at) >= ?';
+      values.push(start_date);
+    }
+    if (end_date) {
+      whereClause += ' AND DATE(o.bill_printed_at) <= ?';
+      values.push(end_date);
+    }
+
+    const { query: dbQuery } = require('../config/database');
+    const rows = await dbQuery(
+      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone,
+              o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
+              o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
+              p.payment_method, p.transaction_id, p.amount AS paid_amount, p.created_at AS payment_time
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.waiter_id
+       LEFT JOIN tables t ON t.id = o.table_id
+       LEFT JOIN payments p ON p.id = (
+         SELECT p2.id FROM payments p2 WHERE p2.order_id = o.id AND p2.status = 'completed'
+         ORDER BY p2.created_at DESC LIMIT 1
+       )
+       WHERE ${whereClause}
+       ORDER BY o.bill_printed_at DESC
+       LIMIT ? OFFSET ?`,
+      [...values, limitInt, offsetInt]
+    );
+
+    res.json({ receipts: rows, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Receipt history error:', error);
+    res.status(500).json({ error: 'Failed to fetch receipt history' });
+  }
+});
+
+// Transaction report for admin (cards/mobile wallet details)
+router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
+  try {
+    const { page = 1, limit = 100, start_date, end_date } = req.query;
+    const limitInt = parseInt(limit) || 100;
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    let whereClause = 'p.status = \'completed\'';
+    const values = [];
+
+    if (start_date) {
+      whereClause += ' AND DATE(p.created_at) >= ?';
+      values.push(start_date);
+    }
+    if (end_date) {
+      whereClause += ' AND DATE(p.created_at) <= ?';
+      values.push(end_date);
+    }
+
+    const { query: dbQuery } = require('../config/database');
+    const txns = await dbQuery(
+      `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
+              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount,
+              o.customer_name, o.customer_phone, u.full_name AS waiter_name
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       LEFT JOIN users u ON u.id = o.waiter_id
+       WHERE ${whereClause}
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...values, limitInt, offsetInt]
+    );
+
+    res.json({ transactions: txns, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Transaction report error:', error);
+    res.status(500).json({ error: 'Failed to fetch transactions report' });
   }
 });
 
