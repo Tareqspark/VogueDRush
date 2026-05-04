@@ -1,7 +1,28 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, MagnifyingGlassIcon, GiftIcon, StarIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Customers', 'Loyalty & Tiers', 'Coupons', 'RFM Segments', 'Feedback'];
+const TABS = ['Customers', 'Loyalty & Tiers', 'Coupons', 'RFM Segments', 'CLV & Cohorts', 'Feedback'];
+
+const PATH_MAP = {
+  '':          'Customers',
+  'customers': 'Customers',
+  'loyalty':   'Loyalty & Tiers',
+  'tiers':     'Loyalty & Tiers',
+  'coupons':   'Coupons',
+  'rfm':       'RFM Segments',
+  'clv':       'CLV & Cohorts',
+  'cohorts':   'CLV & Cohorts',
+  'feedback':  'Feedback',
+};
+const TAB_PATH = {
+  'Customers':       '',
+  'Loyalty & Tiers': 'loyalty',
+  'Coupons':         'coupons',
+  'RFM Segments':    'rfm',
+  'CLV & Cohorts':   'clv',
+  'Feedback':        'feedback',
+};
 
 const CUSTOMERS = [
   { id: 1, name: 'Ahmed Al Rashid',  phone: '+971-50-1234567', email: 'ahmed@email.com',  visits: 28, ltv: 8420.00, points: 3240, tier: 'Gold',     lastVisit: '2026-05-05', segment: 'Champion' },
@@ -50,8 +71,12 @@ function Stars({ rating }) {
 }
 
 export default function CRM() {
-  const [tab, setTab] = useState('Customers');
-  const [search, setSearch] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/crm\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Customers';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/crm/${TAB_PATH[t]}` : '/crm');
+  const [search, setSearch] = React.useState('');
 
   const totalCustomers  = CUSTOMERS.length;
   const loyaltyMembers  = CUSTOMERS.filter(c => c.tier !== 'Bronze').length;
@@ -278,6 +303,64 @@ export default function CRM() {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {tab === 'CLV & Cohorts' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Avg CLV', val: 'AED 4,280', sub: 'Lifetime per customer', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+                  { label: 'Avg Order Value', val: 'AED 152', sub: 'Across all customers', color: 'text-sky-700', bg: 'bg-sky-50', border: 'border-sky-200' },
+                  { label: 'Purchase Freq.', val: '3.2x/mo', sub: 'Active customers', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
+                  { label: 'Churn (30d)', val: '8.4%', sub: 'No order in 30 days', color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
+                ].map(k => (
+                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
+                    <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
+                    <p className="text-xs text-slate-500">{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-700 mb-3">Cohort Retention Matrix</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th className="text-left p-2 text-slate-500 font-semibold">Cohort</th>
+                        <th className="text-center p-2 text-slate-500 font-semibold">Size</th>
+                        {['M+1','M+2','M+3','M+4','M+5'].map(m => (
+                          <th key={m} className="text-center p-2 text-slate-500 font-semibold">{m}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { cohort: 'Nov 2025', size: 142, ret: [62, 44, 36, 28, 22] },
+                        { cohort: 'Dec 2025', size: 188, ret: [68, 50, 42, 31, null] },
+                        { cohort: 'Jan 2026', size: 165, ret: [60, 45, 36, null, null] },
+                        { cohort: 'Feb 2026', size: 174, ret: [65, 48, null, null, null] },
+                        { cohort: 'Mar 2026', size: 192, ret: [71, null, null, null, null] },
+                      ].map(row => (
+                        <tr key={row.cohort}>
+                          <td className="p-2 font-semibold text-slate-700">{row.cohort}</td>
+                          <td className="p-2 text-center text-slate-500">{row.size}</td>
+                          {row.ret.map((pct, i) => (
+                            <td key={i} className="p-1">
+                              {pct !== null ? (
+                                <div className={`rounded px-2 py-1 text-center font-bold ${ pct >= 60 ? 'bg-emerald-600 text-white' : pct >= 40 ? 'bg-emerald-400 text-white' : pct >= 25 ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-600' }`}>{pct}%</div>
+                              ) : (
+                                <div className="text-center text-slate-300">—</div>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </div>

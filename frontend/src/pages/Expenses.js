@@ -1,7 +1,22 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 const TABS = ['Expenses', 'Approval Queue', 'Recurring', 'Budget vs Actual'];
+
+const PATH_MAP = {
+  '':          'Expenses',
+  'entry':     'Expenses',
+  'approval':  'Approval Queue',
+  'recurring': 'Recurring',
+  'budget':    'Budget vs Actual',
+};
+const TAB_PATH = {
+  'Expenses':         '',
+  'Approval Queue':   'approval',
+  'Recurring':        'recurring',
+  'Budget vs Actual': 'budget',
+};
 
 const EXPENSES = [
   { id: 1, date: '2026-05-05', category: 'Utilities',      description: 'DEWA Electricity bill – May',     amount: 3200.00, ref: 'EXP-2026-058', submittedBy: 'Admin',        approver: 'Owner',   status: 'approved' },
@@ -53,8 +68,11 @@ const CAT_COLOR = {
 };
 
 export default function Expenses() {
-  const [tab, setTab]   = useState('Expenses');
-  const [search, ]      = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/expenses\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Expenses';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/expenses/${TAB_PATH[t]}` : '/expenses');
 
   const monthTotal  = EXPENSES.filter(e => e.status !== 'rejected').reduce((s, e) => s + e.amount, 0);
   const pendingAmt  = PENDING_APPROVALS.reduce((s, e) => s + e.amount, 0);

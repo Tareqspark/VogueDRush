@@ -1,7 +1,26 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, DocumentCheckIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Purchase Orders', 'Goods Receiving', 'Invoices', 'Returns'];
+const TABS = ['Purchase Orders', 'Goods Receiving', '3-Way Match', 'Invoices', 'Returns', 'Landed Cost'];
+
+const PATH_MAP = {
+  '':             'Purchase Orders',
+  'orders':       'Purchase Orders',
+  'receiving':    'Goods Receiving',
+  'matching':     '3-Way Match',
+  'invoices':     'Invoices',
+  'returns':      'Returns',
+  'landed-cost':  'Landed Cost',
+};
+const TAB_PATH = {
+  'Purchase Orders':  'orders',
+  'Goods Receiving':  'receiving',
+  '3-Way Match':      'matching',
+  'Invoices':         'invoices',
+  'Returns':          'returns',
+  'Landed Cost':      'landed-cost',
+};
 
 const POS = [
   { id: 1, poNumber: 'PO-2026-05-013', supplier: 'Fresh Farm Ltd.',    date: '2026-05-05', expected: '2026-05-08', items: 8,  total: 15200.00, status: 'draft',           by: 'System (Auto)' },
@@ -38,7 +57,11 @@ const INV_STYLE  = { approved: 'bg-emerald-100 text-emerald-700', hold: 'bg-ambe
 const RET_STYLE  = { approved: 'bg-emerald-50 text-emerald-700', received: 'bg-sky-50 text-sky-700', pending: 'bg-amber-50 text-amber-700' };
 
 export default function Purchase() {
-  const [tab, setTab] = useState('Purchase Orders');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/purchase\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Purchase Orders';
+  const setTab   = (t) => navigate(`/purchase/${TAB_PATH[t]}`);
 
   const activePOValue    = POS.filter(p => ['confirmed', 'partial_receipt'].includes(p.status)).reduce((s, p) => s + p.total, 0);
   const pendingGRN       = POS.filter(p => p.status === 'confirmed').length;
@@ -190,6 +213,77 @@ export default function Purchase() {
                       <td className="font-mono text-xs font-bold text-rose-600">AED {r.amount.toLocaleString()}</td>
                       <td><span className="text-xs capitalize bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.reason.replace('_', ' ')}</span></td>
                       <td><span className={`status-badge ${RET_STYLE[r.status]}`}>{r.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {tab === '3-Way Match' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: 'Perfect Match', val: '18', sub: 'PO = GRN = Invoice', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+                  { label: 'Qty Variance',  val: '4',  sub: 'GRN ≠ PO qty',        color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200'  },
+                  { label: 'Price Variance',val: '2',  sub: 'Invoice ≠ PO price',  color: 'text-rose-700',   bg: 'bg-rose-50',    border: 'border-rose-200'   },
+                ].map(k => (
+                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
+                    <p className={`text-3xl font-black ${k.color}`}>{k.val}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
+                    <p className="text-xs text-slate-500">{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>PO Ref</th><th>GRN Ref</th><th>Invoice Ref</th><th>PO Qty</th><th>GRN Qty</th><th>Inv Qty</th><th>PO Price</th><th>Inv Price</th><th>Match Status</th></tr></thead>
+                  <tbody>
+                    {[
+                      { po: 'PO-2248', grn: 'GRN-0881', inv: 'INV-5503', poQty: 20, grnQty: 20, invQty: 20, poPrice: 45.00, invPrice: 45.00, status: 'perfect' },
+                      { po: 'PO-2247', grn: 'GRN-0880', inv: 'INV-5501', poQty: 50, grnQty: 48, invQty: 50, poPrice: 12.00, invPrice: 12.00, status: 'qty-var' },
+                      { po: 'PO-2246', grn: 'GRN-0878', inv: 'INV-5498', poQty: 10, grnQty: 10, invQty: 10, poPrice: 95.00, invPrice: 98.50, status: 'price-var' },
+                      { po: 'PO-2245', grn: 'GRN-0877', inv: 'INV-5495', poQty: 30, grnQty: 30, invQty: 30, poPrice: 22.00, invPrice: 22.00, status: 'perfect' },
+                    ].map((r, i) => (
+                      <tr key={i}>
+                        <td><code className="text-xs text-sky-700">{r.po}</code></td>
+                        <td><code className="text-xs text-slate-600">{r.grn}</code></td>
+                        <td><code className="text-xs text-slate-600">{r.inv}</code></td>
+                        <td className="text-xs font-mono text-slate-700">{r.poQty}</td>
+                        <td className={`text-xs font-mono font-bold ${r.grnQty !== r.poQty ? 'text-amber-700' : 'text-slate-700'}`}>{r.grnQty}</td>
+                        <td className={`text-xs font-mono font-bold ${r.invQty !== r.grnQty ? 'text-amber-700' : 'text-slate-700'}`}>{r.invQty}</td>
+                        <td className="text-xs font-mono text-slate-700">AED {r.poPrice}</td>
+                        <td className={`text-xs font-mono font-bold ${r.invPrice !== r.poPrice ? 'text-rose-700' : 'text-slate-700'}`}>AED {r.invPrice}</td>
+                        <td><span className={`status-badge ${ r.status === 'perfect' ? 'bg-emerald-50 text-emerald-700' : r.status === 'qty-var' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700' }`}>{r.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {tab === 'Landed Cost' && (
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead><tr><th>GRN Ref</th><th>Supplier</th><th>Base Cost</th><th>Freight</th><th>Customs</th><th>Handling</th><th>Total Landed</th><th>Method</th><th>Status</th></tr></thead>
+                <tbody>
+                  {[
+                    { grn: 'GRN-0881', supplier: 'Fresh Farm Ltd.',   base: 900.00,  freight: 45.00, customs: 0,     handling: 20.00, method: 'Weight', status: 'posted'  },
+                    { grn: 'GRN-0880', supplier: 'Dairy Direct',      base: 576.00,  freight: 30.00, customs: 0,     handling: 15.00, method: 'Value',  status: 'posted'  },
+                    { grn: 'GRN-0878', supplier: 'Mediterranean Co.', base: 950.00,  freight: 80.00, customs: 45.00, handling: 25.00, method: 'Weight', status: 'pending' },
+                    { grn: 'GRN-0877', supplier: 'Grain Masters',     base: 660.00,  freight: 25.00, customs: 0,     handling: 10.00, method: 'Qty',    status: 'posted'  },
+                  ].map((r, i) => (
+                    <tr key={i}>
+                      <td><code className="text-xs text-sky-700">{r.grn}</code></td>
+                      <td className="text-xs font-semibold text-slate-700">{r.supplier}</td>
+                      <td className="font-mono text-xs text-slate-700">AED {r.base.toFixed(2)}</td>
+                      <td className="font-mono text-xs text-slate-500">AED {r.freight.toFixed(2)}</td>
+                      <td className="font-mono text-xs text-slate-500">{r.customs ? `AED ${r.customs.toFixed(2)}` : '—'}</td>
+                      <td className="font-mono text-xs text-slate-500">AED {r.handling.toFixed(2)}</td>
+                      <td className="font-mono text-xs font-black text-emerald-700">AED {(r.base + r.freight + r.customs + r.handling).toFixed(2)}</td>
+                      <td className="text-xs text-slate-500">{r.method}</td>
+                      <td><span className={`status-badge ${ r.status === 'posted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700' }`}>{r.status}</span></td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,6 +1,23 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const TABS = ['Peak Hours', 'Menu Engineering', 'Customer Cohorts', 'Forecast', 'Profitability'];
+
+const PATH_MAP = {
+  '':                  'Peak Hours',
+  'peak-hours':        'Peak Hours',
+  'menu-engineering':  'Menu Engineering',
+  'cohorts':           'Customer Cohorts',
+  'forecast':          'Forecast',
+  'profitability':     'Profitability',
+};
+const TAB_PATH = {
+  'Peak Hours':       'peak-hours',
+  'Menu Engineering': 'menu-engineering',
+  'Customer Cohorts': 'cohorts',
+  'Forecast':         'forecast',
+  'Profitability':    'profitability',
+};
 
 // Peak hours heatmap: 7 days × 18 hours (6am-midnight)
 const HOURS = Array.from({ length: 18 }, (_, i) => `${i + 6}:00`);
@@ -84,7 +101,11 @@ function cohortColor(pct) {
 }
 
 export default function BusinessIntelligence() {
-  const [tab, setTab] = useState('Peak Hours');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/bi\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Peak Hours';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/bi/${TAB_PATH[t]}` : '/bi/peak-hours');
 
   return (
     <div className="animate-fade-in space-y-5">

@@ -1,7 +1,24 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, TruckIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Riders', 'Zones', 'Assignments', 'Commissions'];
+const TABS = ['Riders', 'Zones', 'Assignments', 'Live Tracking', 'Commissions'];
+
+const PATH_MAP = {
+  '':            'Riders',
+  'riders':      'Riders',
+  'zones':       'Zones',
+  'assignments': 'Assignments',
+  'tracking':    'Live Tracking',
+  'commissions': 'Commissions',
+};
+const TAB_PATH = {
+  'Riders':        'riders',
+  'Zones':         'zones',
+  'Assignments':   'assignments',
+  'Live Tracking': 'tracking',
+  'Commissions':   'commissions',
+};
 
 const RIDERS = [
   { id: 1, name: 'Carlos Mendez',   phone: '+971-50-5678901', zone: 'Zone A – Downtown',  vehicle: 'Motorbike', orders: 8,  rating: 4.8, status: 'on_delivery',  lat: 24.468, lng: 54.371 },
@@ -48,7 +65,11 @@ const ASSIGN_STYLE = {
 };
 
 export default function Fleet() {
-  const [tab, setTab] = useState('Riders');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/fleet\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Riders';
+  const setTab   = (t) => navigate(`/fleet/${TAB_PATH[t]}`);
 
   const activeRiders   = RIDERS.filter(r => r.status === 'on_delivery' || r.status === 'available').length;
   const onDelivery     = RIDERS.filter(r => r.status === 'on_delivery').length;
@@ -197,6 +218,49 @@ export default function Fleet() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          )}
+
+          {tab === 'Live Tracking' && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-slate-800 p-4 text-white">
+                <p className="text-xs text-slate-400 mb-3">Live Delivery Map — {RIDERS.filter(r => r.status === 'on_delivery').length} active deliveries</p>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {RIDERS.filter(r => r.status === 'on_delivery').map(r => (
+                    <div key={r.id} className="bg-slate-700 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+                        <span className="text-xs font-bold text-white">{r.name.split(' ')[0]}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-300">{r.zone}</p>
+                      <p className="text-[10px] text-slate-400 mt-1">Orders today: {r.orders}</p>
+                      <p className="text-[10px] text-slate-400">Rating: ⭐ {r.rating}</p>
+                      <div className="mt-2 h-1 bg-slate-600 rounded-full overflow-hidden">
+                        <div className="h-full bg-sky-400 rounded-full" style={{ width: '65%' }} />
+                      </div>
+                      <p className="text-[10px] text-sky-300 mt-0.5">ETA ~12 min</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Rider</th><th>Status</th><th>Order</th><th>Zone</th><th>Dispatched</th><th>ETA</th><th>SLA</th></tr></thead>
+                  <tbody>
+                    {RIDERS.map((r, i) => (
+                      <tr key={r.id}>
+                        <td className="font-semibold text-slate-800">{r.name}</td>
+                        <td><span className={`status-badge ${ r.status === 'on_delivery' ? 'bg-sky-50 text-sky-700' : r.status === 'available' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500' }`}>{r.status}</span></td>
+                        <td><code className="text-xs text-slate-600">{r.status === 'on_delivery' ? `ORD-${1200 + r.id}` : '—'}</code></td>
+                        <td className="text-xs text-slate-500">{r.zone}</td>
+                        <td className="text-xs text-slate-500">{r.status === 'on_delivery' ? `${14 + i}:${(20 + i * 7) % 60}`.padEnd(5, '0') : '—'}</td>
+                        <td className="text-xs font-semibold text-slate-700">{r.status === 'on_delivery' ? `${10 + i * 4} min` : '—'}</td>
+                        <td><span className={`status-badge text-xs ${ r.status === 'on_delivery' && i < 2 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700' }`}>{r.status === 'on_delivery' && i < 2 ? 'At Risk' : 'On Time'}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

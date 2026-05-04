@@ -1,7 +1,26 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Journal Entries', 'Chart of Accounts', 'Bank Reconciliation', 'VAT Summary', 'P&L Report'];
+const TABS = ['Journal Entries', 'Chart of Accounts', 'Bank Reconciliation', 'VAT Summary', 'P&L Report', 'Period Close'];
+
+const PATH_MAP = {
+  '':                      'Journal Entries',
+  'journal':               'Journal Entries',
+  'coa':                   'Chart of Accounts',
+  'bank-reconciliation':   'Bank Reconciliation',
+  'vat':                   'VAT Summary',
+  'reports':               'P&L Report',
+  'periods':               'Period Close',
+};
+const TAB_PATH = {
+  'Journal Entries':     'journal',
+  'Chart of Accounts':   'coa',
+  'Bank Reconciliation': 'bank-reconciliation',
+  'VAT Summary':         'vat',
+  'P&L Report':          'reports',
+  'Period Close':        'periods',
+};
 
 const JOURNALS = [
   { id: 1, date: '2026-05-05', ref: 'JE-2026-142', description: 'Daily sales revenue – Table service',  dr: 'Accounts Receivable', cr: 'Sales Revenue',      amount: 18450.00, status: 'posted',  by: 'System' },
@@ -63,7 +82,11 @@ const PNL = [
 const TYPE_STYLE = { Asset: 'bg-sky-50 text-sky-700', Liability: 'bg-rose-50 text-rose-700', Equity: 'bg-violet-50 text-violet-700', Revenue: 'bg-emerald-50 text-emerald-700', Expense: 'bg-amber-50 text-amber-700' };
 
 export default function Accounting() {
-  const [tab, setTab] = useState('Journal Entries');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/accounting\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Journal Entries';
+  const setTab   = (t) => navigate(`/accounting/${TAB_PATH[t]}`);
 
   const revenue   = PNL.find(p => p.line === 'Revenue').amount;
   const cogs      = Math.abs(PNL.find(p => p.line === 'Less: COGS').amount);
@@ -225,6 +248,41 @@ export default function Accounting() {
                   <span className="text-sm font-bold text-emerald-800">Net Profit Margin</span>
                   <span className="text-xl font-black text-emerald-700">{((PNL.find(p=>p.line==='Net Profit').amount / revenue)*100).toFixed(1)}%</span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'Period Close' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-bold text-slate-700">Period: April 2026 — Close Checklist</p>
+                <span className="status-badge bg-amber-50 text-amber-700">2 items pending</span>
+              </div>
+              {[
+                { task: 'All journal entries posted',              status: 'done',    by: 'System',    date: '2026-04-30' },
+                { task: 'Bank reconciliation completed',           status: 'done',    by: 'Admin',     date: '2026-04-30' },
+                { task: 'VAT return filed',                        status: 'done',    by: 'Accountant',date: '2026-04-29' },
+                { task: 'Expense accruals posted',                 status: 'done',    by: 'Admin',     date: '2026-04-30' },
+                { task: 'Inventory stock count reconciled',        status: 'pending', by: '—',         date: '—' },
+                { task: 'Payroll GL posting confirmed',            status: 'pending', by: '—',         date: '—' },
+                { task: 'Supplier invoice matching 100%',          status: 'done',    by: 'Admin',     date: '2026-04-28' },
+                { task: 'Period soft-close executed',              status: 'done',    by: 'Owner',     date: '2026-04-30' },
+              ].map((item, i) => (
+                <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border ${ item.status === 'done' ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200' }`}>
+                  <span className={`h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-black ${ item.status === 'done' ? 'bg-emerald-500' : 'bg-amber-400' }`}>{item.status === 'done' ? '✓' : '!'}</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-800">{item.task}</p>
+                    <p className="text-xs text-slate-500">Completed by {item.by} · {item.date}</p>
+                  </div>
+                  {item.status === 'pending' && <button className="btn btn-sm btn-primary text-xs">Action</button>}
+                </div>
+              ))}
+              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-700">Hard Close Period</p>
+                  <p className="text-xs text-slate-500">Locks all transactions in April 2026 permanently. Requires admin password.</p>
+                </div>
+                <button className="btn btn-sm" style={{background:'#ef4444',color:'white'}}>🔒 Hard Close</button>
               </div>
             </div>
           )}

@@ -1,7 +1,28 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { QrCodeIcon, PlusIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['QR Codes', 'Active Sessions', 'Analytics'];
+const TABS = ['QR Codes', 'Active Sessions', 'Cart & Payment', 'Status & Feedback', 'Analytics'];
+
+const PATH_MAP = {
+  '':         'QR Codes',
+  'setup':    'QR Codes',
+  'codes':    'QR Codes',
+  'sessions': 'Active Sessions',
+  'menu':     'Active Sessions',
+  'cart':     'Cart & Payment',
+  'payment':  'Cart & Payment',
+  'status':   'Status & Feedback',
+  'feedback': 'Status & Feedback',
+  'analytics':'Analytics',
+};
+const TAB_PATH = {
+  'QR Codes':           '',
+  'Active Sessions':    'sessions',
+  'Cart & Payment':     'cart',
+  'Status & Feedback':  'status',
+  'Analytics':          'analytics',
+};
 
 const TABLES = [
   { id: 1, label: 'T-01', zone: 'Indoor', capacity: 4,  qrStatus: 'active',    session: { orderId: 'ORD-1258', cart: 2, total: 285.00,  mins: 24 } },
@@ -46,7 +67,11 @@ function QRPattern() {
 }
 
 export default function QROrdering() {
-  const [tab, setTab] = useState('QR Codes');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/qr-ordering\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'QR Codes';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/qr-ordering/${TAB_PATH[t]}` : '/qr-ordering');
 
   const activeSessions = SESSIONS.length;
   const todayOrders    = 88;
@@ -171,6 +196,73 @@ export default function QROrdering() {
                     <p className="text-xs text-slate-400">{s.sub}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'Cart & Payment' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { label: 'Open Carts', val: SESSIONS.length, sub: 'Awaiting checkout', color: 'text-sky-700', bg: 'bg-sky-50', border: 'border-sky-200' },
+                  { label: 'Avg Cart Value', val: `AED ${Math.round(SESSIONS.reduce((s,t)=>s+t.session.total,0)/SESSIONS.length)}`, sub: 'Active sessions', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+                  { label: 'Bill Requested', val: '3', sub: 'Awaiting waiter', color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
+                  { label: 'Payments Today', val: '62', sub: 'Card + cash', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
+                ].map(k => (
+                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
+                    <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
+                    <p className="text-xs text-slate-500">{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Table</th><th>Order</th><th>Items</th><th>Cart Total</th><th>VAT</th><th>Grand Total</th><th>Payment Method</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {SESSIONS.map(t => (
+                      <tr key={t.id}>
+                        <td className="font-bold text-slate-800">{t.label}</td>
+                        <td><code className="text-xs text-sky-700">{t.session.orderId}</code></td>
+                        <td className="text-xs text-slate-500">{t.session.cart} items</td>
+                        <td className="font-mono text-xs text-slate-700">AED {t.session.total.toFixed(2)}</td>
+                        <td className="font-mono text-xs text-slate-500">AED {(t.session.total * 0.05).toFixed(2)}</td>
+                        <td className="font-mono text-xs font-bold text-slate-700">AED {(t.session.total * 1.05).toFixed(2)}</td>
+                        <td><span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Card</span></td>
+                        <td><span className="status-badge bg-amber-50 text-amber-700">awaiting</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {tab === 'Status & Feedback' && (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Table</th><th>Order</th><th>Stage</th><th>Food</th><th>Service</th><th>Overall</th><th>Comment</th></tr></thead>
+                  <tbody>
+                    {[
+                      { table: 'T-03', order: 'ORD-1241', stage: 'served',    food: 5, service: 4, overall: 5, comment: 'Pizza was amazing!' },
+                      { table: 'T-07', order: 'ORD-1240', stage: 'preparing', food: null, service: null, overall: null, comment: '—' },
+                      { table: 'T-09', order: 'ORD-1239', stage: 'ready',     food: null, service: null, overall: null, comment: '—' },
+                      { table: 'T-02', order: 'ORD-1238', stage: 'served',    food: 3, service: 4, overall: 3, comment: 'Wait time was long' },
+                      { table: 'T-05', order: 'ORD-1237', stage: 'served',    food: 5, service: 5, overall: 5, comment: 'Excellent service 👏' },
+                    ].map((r, i) => (
+                      <tr key={i}>
+                        <td className="font-bold text-slate-800">{r.table}</td>
+                        <td><code className="text-xs text-sky-700">{r.order}</code></td>
+                        <td><span className={`status-badge text-xs ${ r.stage === 'served' ? 'bg-emerald-50 text-emerald-700' : r.stage === 'ready' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700' }`}>{r.stage}</span></td>
+                        <td className="text-xs">{r.food ? '⭐'.repeat(r.food) : '—'}</td>
+                        <td className="text-xs">{r.service ? '⭐'.repeat(r.service) : '—'}</td>
+                        <td className="text-xs font-bold text-slate-700">{r.overall ? `${r.overall}/5` : '—'}</td>
+                        <td className="text-xs text-slate-500 max-w-[180px]">{r.comment}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

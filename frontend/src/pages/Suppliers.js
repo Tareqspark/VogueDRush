@@ -1,7 +1,24 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Suppliers', 'Ledger', 'Payables Aging', 'Performance'];
+const TABS = ['Suppliers', 'Ledger', 'Payables Aging', 'Performance', 'ABC Segments'];
+
+const PATH_MAP = {
+  '':            'Suppliers',
+  'suppliers':   'Suppliers',
+  'ledger':      'Ledger',
+  'payables':    'Payables Aging',
+  'performance': 'Performance',
+  'segments':    'ABC Segments',
+};
+const TAB_PATH = {
+  'Suppliers':      '',
+  'Ledger':         'ledger',
+  'Payables Aging': 'payables',
+  'Performance':    'performance',
+  'ABC Segments':   'segments',
+};
 
 const SUPPLIERS = [
   { id: 1, name: 'Fresh Farm Ltd.',    category: 'Proteins',  contact: 'James O.',  phone: '+971-50-2341234', terms: 'NET-30', balance: 12400.00, score: 92, abc: 'A', status: 'active' },
@@ -52,8 +69,12 @@ function ScoreBar({ value }) {
 }
 
 export default function Suppliers() {
-  const [tab, setTab] = useState('Suppliers');
-  const [search, setSearch] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/suppliers\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Suppliers';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/suppliers/${TAB_PATH[t]}` : '/suppliers');
+  const [search, setSearch] = React.useState('');
 
   const totalAP       = SUPPLIERS.filter(s => s.status === 'active').reduce((s, x) => s + x.balance, 0);
   const overdueAP     = AGING.reduce((s, a) => s + a.overdue, 0);
@@ -224,7 +245,89 @@ export default function Suppliers() {
               </div>
             </div>
           )}
-        </div>
+
+          {tab === 'ABC Segments' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { cls: 'A', label: 'Class A — Strategic', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-300', count: 2, spend: 'AED 168,400', pct: '62%', desc: 'Top 20% by spend — Negotiate best terms, build partnerships' },
+                  { cls: 'B', label: 'Class B — Preferred', color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-300',     count: 2, spend: 'AED 58,200',  pct: '21%', desc: 'Middle tier — Regular review, volume discounts possible' },
+                  { cls: 'C', label: 'Class C — Routine',   color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-300',   count: 2, spend: 'AED 45,000',  pct: '17%', desc: 'Occasional buys — Consolidate or find alternatives' },
+                ].map(seg => (
+                  <div key={seg.cls} className={`rounded-2xl border-2 ${seg.border} ${seg.bg} p-4`}>
+                    <div className={`text-4xl font-black ${seg.color} mb-2`}>{seg.cls}</div>
+                    <p className={`text-sm font-bold ${seg.color}`}>{seg.label}</p>
+                    <p className="text-xs text-slate-500 mt-1">{seg.desc}</p>
+                    <hr className="my-2 border-slate-200" />
+                    <div className="text-xs space-y-0.5">
+                      <div className="flex justify-between"><span className="text-slate-500">Suppliers</span><span className="font-bold text-slate-700">{seg.count}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Annual Spend</span><span className="font-bold text-slate-700">{seg.spend}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">% of Total</span><span className={`font-bold ${seg.color}`}>{seg.pct}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Supplier</th><th>Class</th><th>Annual Spend</th><th>% of Total</th><th>Deliveries</th><th>Score</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {SUPPLIERS.map(s => (
+                      <tr key={s.id}>
+                        <td className="font-semibold text-slate-800">{s.name}</td>
+                        <td><span className={`status-badge font-black ${ s.abc === 'A' ? 'bg-emerald-50 text-emerald-700' : s.abc === 'B' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500' }`}>{s.abc}</span></td>
+                        <td className="font-mono text-xs font-bold text-slate-700">AED {(s.balance * 12 * 0.9).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
+                        <td className="text-xs font-bold text-slate-600">{s.abc === 'A' ? '31%' : s.abc === 'B' ? '18%' : '9%'}</td>
+                        <td className="text-xs text-slate-500">{(s.score / 5).toFixed(0)} / mo</td>
+                        <td><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${s.score}%`}} /></div></td>
+                        <td><button className="btn btn-ghost btn-sm text-xs text-sky-600">Review</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {tab === 'ABC Segments' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { cls: 'A', label: 'Class A — Strategic', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-300', count: 2, spend: 'AED 168,400', pct: '62%', desc: 'Top 20% by spend — Negotiate best terms, build partnerships' },
+                  { cls: 'B', label: 'Class B — Preferred', color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-300',     count: 2, spend: 'AED 58,200',  pct: '21%', desc: 'Middle tier — Regular review, volume discounts possible' },
+                  { cls: 'C', label: 'Class C — Routine',   color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-300',   count: 2, spend: 'AED 45,000',  pct: '17%', desc: 'Occasional buys — Consolidate or find alternatives' },
+                ].map(seg => (
+                  <div key={seg.cls} className={`rounded-2xl border-2 ${seg.border} ${seg.bg} p-4`}>
+                    <div className={`text-4xl font-black ${seg.color} mb-2`}>{seg.cls}</div>
+                    <p className={`text-sm font-bold ${seg.color}`}>{seg.label}</p>
+                    <p className="text-xs text-slate-500 mt-1">{seg.desc}</p>
+                    <hr className="my-2 border-slate-200" />
+                    <div className="text-xs space-y-0.5">
+                      <div className="flex justify-between"><span className="text-slate-500">Suppliers</span><span className="font-bold text-slate-700">{seg.count}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Annual Spend</span><span className="font-bold text-slate-700">{seg.spend}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">% of Total</span><span className={`font-bold ${seg.color}`}>{seg.pct}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Supplier</th><th>Class</th><th>Annual Spend</th><th>% of Total</th><th>Deliveries</th><th>Score</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {SUPPLIERS.map(s => (
+                      <tr key={s.id}>
+                        <td className="font-semibold text-slate-800">{s.name}</td>
+                        <td><span className={`status-badge font-black ${ s.abc === 'A' ? 'bg-emerald-50 text-emerald-700' : s.abc === 'B' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500' }`}>{s.abc}</span></td>
+                        <td className="font-mono text-xs font-bold text-slate-700">AED {(s.balance * 12 * 0.9).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
+                        <td className="text-xs font-bold text-slate-600">{s.abc === 'A' ? '31%' : s.abc === 'B' ? '18%' : '9%'}</td>
+                        <td className="text-xs text-slate-500">{(s.score / 5).toFixed(0)} / mo</td>
+                        <td><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${s.score}%`}} /></div></td>
+                        <td><button className="btn btn-ghost btn-sm text-xs text-sky-600">Review</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}        </div>
       </div>
     </div>
   );

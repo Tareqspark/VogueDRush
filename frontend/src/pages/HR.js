@@ -1,7 +1,29 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, UserGroupIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Shifts & Schedule', 'Attendance', 'Overtime', 'Payroll', 'Payslips'];
+const TABS = ['Shifts & Schedule', 'Attendance', 'Overtime', 'Payroll', 'Tips & Commissions', 'Payslips'];
+
+const PATH_MAP = {
+  '':            'Shifts & Schedule',
+  'shifts':      'Shifts & Schedule',
+  'attendance':  'Attendance',
+  'clock':       'Attendance',
+  'overtime':    'Overtime',
+  'payroll':     'Payroll',
+  'tips':        'Tips & Commissions',
+  'commissions': 'Tips & Commissions',
+  'payslips':    'Payslips',
+  'reports':     'Payslips',
+};
+const TAB_PATH = {
+  'Shifts & Schedule':    'shifts',
+  'Attendance':           'attendance',
+  'Overtime':             'overtime',
+  'Payroll':              'payroll',
+  'Tips & Commissions':   'tips',
+  'Payslips':             'payslips',
+};
 
 const STAFF = [
   { id: 1, name: 'Chef Ali Hassan',    role: 'Head Chef',       dept: 'Kitchen',   salary: 8500.00,  hoursMonth: 168, otHours: 12, status: 'present' },
@@ -43,7 +65,11 @@ const OVERTIME = [
 const PAYROLL_STATUS = { present: 'bg-emerald-50 text-emerald-700', on_leave: 'bg-amber-50 text-amber-700', absent: 'bg-rose-50 text-rose-700' };
 
 export default function HR() {
-  const [tab, setTab] = useState('Shifts & Schedule');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/hr\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Shifts & Schedule';
+  const setTab   = (t) => navigate(`/hr/${TAB_PATH[t]}`);
 
   const totalStaff    = STAFF.length;
   const presentToday  = STAFF.filter(s => s.status === 'present').length;
@@ -223,6 +249,50 @@ export default function HR() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {tab === 'Tips & Commissions' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { label: 'Pool Tips – May W1', val: 'AED 2,840', sub: 'Equal-split across 6 FOH staff', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+                  { label: 'Rider Commissions', val: 'AED 3,180', sub: '42 deliveries this week', color: 'text-sky-700', bg: 'bg-sky-50', border: 'border-sky-200' },
+                  { label: 'Performance Bonus', val: 'AED 1,200', sub: '2 staff hit sales target', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
+                  { label: 'Total Variable Pay', val: 'AED 7,220', sub: 'Pending payroll merge', color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
+                ].map(k => (
+                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
+                    <p className={`text-xl font-black ${k.color}`}>{k.val}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
+                    <p className="text-xs text-slate-500">{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Staff</th><th>Role</th><th>Tips Earned</th><th>Commission</th><th>Bonus</th><th>Total Variable</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {[
+                      { name: 'Carlos Mendez',  role: 'Rider',       tips: 0,   comm: 1260.00, bonus: 0,    status: 'pending' },
+                      { name: 'Ahmed Khalil',   role: 'Rider',       tips: 0,   comm: 1050.00, bonus: 0,    status: 'pending' },
+                      { name: 'James Okafor',   role: 'Head Waiter', tips: 680, comm: 0,       bonus: 600,  status: 'approved' },
+                      { name: 'Priya Nair',     role: 'Cashier',     tips: 420, comm: 0,       bonus: 0,    status: 'pending' },
+                      { name: 'Fatima Al Zaabi',role: 'Hostess',     tips: 380, comm: 0,       bonus: 600,  status: 'approved' },
+                      { name: 'Sara Malik',     role: 'Sous Chef',   tips: 0,   comm: 0,       bonus: 0,    status: 'n/a' },
+                    ].map((s, i) => (
+                      <tr key={i}>
+                        <td className="font-semibold text-slate-800">{s.name}</td>
+                        <td className="text-xs text-slate-500">{s.role}</td>
+                        <td className="font-mono text-xs text-slate-700">{s.tips ? `AED ${s.tips}` : '—'}</td>
+                        <td className="font-mono text-xs text-sky-700">{s.comm ? `AED ${s.comm.toFixed(2)}` : '—'}</td>
+                        <td className="font-mono text-xs text-violet-700">{s.bonus ? `AED ${s.bonus}` : '—'}</td>
+                        <td className="font-mono text-xs font-bold text-emerald-700">AED {(s.tips + s.comm + s.bonus).toFixed(2)}</td>
+                        <td><span className={`status-badge ${ s.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : s.status === 'pending' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500' }`}>{s.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

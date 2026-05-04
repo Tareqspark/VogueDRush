@@ -1,7 +1,32 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Dashboard', 'Ingredients', 'Recipes', 'Stock Ledger', 'Waste & Expiry', 'Alerts'];
+const TABS = ['Dashboard', 'Ingredients', 'Recipes', 'Stock Ledger', 'Physical Count', 'Waste & Expiry', 'Alerts'];
+
+const PATH_MAP = {
+  '':               'Dashboard',
+  'dashboard':      'Dashboard',
+  'ingredients':    'Ingredients',
+  'recipes':        'Recipes',
+  'ledger':         'Stock Ledger',
+  'adjustments':    'Stock Ledger',
+  'physical-count': 'Physical Count',
+  'waste':          'Waste & Expiry',
+  'expiry':         'Waste & Expiry',
+  'batches':        'Waste & Expiry',
+  'alerts':         'Alerts',
+  'reorder':        'Alerts',
+};
+const TAB_PATH = {
+  'Dashboard':       '',
+  'Ingredients':     'ingredients',
+  'Recipes':         'recipes',
+  'Stock Ledger':    'ledger',
+  'Physical Count':  'physical-count',
+  'Waste & Expiry':  'waste',
+  'Alerts':          'alerts',
+};
 
 const INGREDIENTS = [
   { id: 1, sku: 'ING-001', name: 'All-Purpose Flour',  category: 'Dry Goods',   unit: 'kg',  current: 145.5, reorder: 75,  min: 50,  max: 200, cost: 25.50,  status: 'ok',       supplier: 'Agro Foods' },
@@ -60,8 +85,13 @@ function StockBar({ current, min, reorder, max }) {
 }
 
 export default function Inventory() {
-  const [tab, setTab] = useState('Dashboard');
-  const [search, setSearch] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/inventory\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Dashboard';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/inventory/${TAB_PATH[t]}` : '/inventory');
+  const [search, setSearch] = React.useState('');
+
 
   const filtered     = INGREDIENTS.filter(i => i.name.toLowerCase().includes(search.toLowerCase()) || i.sku.toLowerCase().includes(search.toLowerCase()));
   const totalValue   = INGREDIENTS.reduce((s, i) => s + i.current * i.cost, 0);
@@ -312,6 +342,64 @@ export default function Inventory() {
                   <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">{a.time}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {tab === 'Physical Count' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm font-bold text-slate-700">Count Sessions</p>
+                <button className="btn btn-sm bg-sky-600 text-white hover:bg-sky-700">➕ New Count Session</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead><tr><th>Session ID</th><th>Date</th><th>Category</th><th>Items</th><th>Status</th><th>Variance Value</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {[
+                      { id: 'PC-2026-04', date: '2026-04-01', cat: 'Full Inventory', items: 48, status: 'completed', variance: -420 },
+                      { id: 'PC-2026-03', date: '2026-03-15', cat: 'Produce',        items: 14, status: 'completed', variance:  -85 },
+                      { id: 'PC-2026-05', date: '2026-04-08', cat: 'Dairy & Protein', items: 12, status: 'in-progress', variance: null },
+                      { id: 'PC-2026-06', date: '2026-04-10', cat: 'Dry Goods',      items: 20, status: 'draft',       variance: null },
+                    ].map(s => (
+                      <tr key={s.id}>
+                        <td><code className="text-xs text-sky-700">{s.id}</code></td>
+                        <td className="text-xs text-slate-500">{s.date}</td>
+                        <td className="text-xs text-slate-600">{s.cat}</td>
+                        <td className="text-xs font-bold text-slate-700">{s.items}</td>
+                        <td><span className={`status-badge ${ s.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : s.status === 'in-progress' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500' }`}>{s.status}</span></td>
+                        <td className="font-mono text-xs font-bold text-rose-600">{s.variance !== null ? `AED ${s.variance}` : '—'}</td>
+                        <td><button className="btn btn-ghost btn-sm text-xs text-sky-600">{s.status === 'draft' ? 'Start' : s.status === 'in-progress' ? 'Continue' : 'View'}</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-700 mb-2">Last Count Variances — PC-2026-04</p>
+                <div className="overflow-x-auto">
+                  <table className="table">
+                    <thead><tr><th>Ingredient</th><th>Expected</th><th>Counted</th><th>Variance Qty</th><th>Unit Cost</th><th>Variance Value</th></tr></thead>
+                    <tbody>
+                      {[
+                        { name: 'Chicken Breast',  exp: '18.0 kg',  cnt: '16.5 kg',  vqty: '-1.5 kg',  uc: 'AED 45', vval: '-67.50', ok: false },
+                        { name: 'Cherry Tomatoes', exp: '8.0 kg',   cnt: '7.8 kg',   vqty: '-0.2 kg',  uc: 'AED 12', vval: '-2.40',  ok: false },
+                        { name: 'Mozzarella',      exp: '6.0 kg',   cnt: '5.5 kg',   vqty: '-0.5 kg',  uc: 'AED 95', vval: '-47.50', ok: false },
+                        { name: 'Olive Oil',       exp: '10.0 L',   cnt: '10.0 L',   vqty: '0.0 L',    uc: 'AED 28', vval: 'AED 0',  ok: true  },
+                        { name: 'Basil',           exp: '2.0 kg',   cnt: '1.6 kg',   vqty: '-0.4 kg',  uc: 'AED 35', vval: '-14.00', ok: false },
+                      ].map((r, i) => (
+                        <tr key={i}>
+                          <td className="font-semibold text-slate-800">{r.name}</td>
+                          <td className="text-xs text-slate-500">{r.exp}</td>
+                          <td className="text-xs text-slate-500">{r.cnt}</td>
+                          <td className={`text-xs font-bold ${r.ok ? 'text-slate-400' : 'text-rose-600'}`}>{r.vqty}</td>
+                          <td className="text-xs text-slate-500">{r.uc}</td>
+                          <td className={`font-mono text-xs font-bold ${r.ok ? 'text-slate-400' : 'text-rose-600'}`}>{r.vval}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </div>

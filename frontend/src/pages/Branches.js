@@ -1,7 +1,24 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
 
-const TABS = ['Overview', 'Branches', 'Transfers', 'Comparative Report'];
+const TABS = ['Overview', 'Branches', 'Transfers', 'Data Isolation', 'Comparative Report'];
+
+const PATH_MAP = {
+  '':          'Overview',
+  'setup':     'Branches',
+  'transfers': 'Transfers',
+  'access':    'Data Isolation',
+  'isolation': 'Data Isolation',
+  'dashboard': 'Comparative Report',
+};
+const TAB_PATH = {
+  'Overview':           '',
+  'Branches':           'setup',
+  'Transfers':          'transfers',
+  'Data Isolation':     'access',
+  'Comparative Report': 'dashboard',
+};
 
 const BRANCHES = [
   { id: 1, name: 'FoodPark Downtown',   city: 'Abu Dhabi', manager: 'Ali Hassan',   tables: 40, staff: 18, revenue: 128500.00, orders: 1480, avgCheck: 86.8,  covers: 4200, rating: 4.7, status: 'open' },
@@ -27,7 +44,11 @@ const TRANSFER_STYLE = {
 };
 
 export default function Branches() {
-  const [tab, setTab] = useState('Overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/branches\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Overview';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/branches/${TAB_PATH[t]}` : '/branches');
 
   const totalRevenue  = BRANCHES.reduce((s, b) => s + b.revenue, 0);
   const totalCovers   = BRANCHES.reduce((s, b) => s + b.covers, 0);
@@ -182,6 +203,70 @@ export default function Branches() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {tab === 'Data Isolation' && (
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-3 gap-3">
+                {[
+                  { label: 'Branches Isolated', val: BRANCHES.length, sub: 'Separate DB schemas', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+                  { label: 'Cross-Branch APIs', val: '0', sub: 'No data leaks detected', color: 'text-sky-700', bg: 'bg-sky-50', border: 'border-sky-200' },
+                  { label: 'Role Scope Tests', val: '14/14', sub: 'All passed', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
+                ].map(k => (
+                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
+                    <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
+                    <p className="text-xs text-slate-500">{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-700 mb-2">Role Scoping — Access Control Matrix</p>
+                <div className="overflow-x-auto">
+                  <table className="table">
+                    <thead><tr><th>User</th><th>Branch</th><th>Role</th><th>Own Branch</th><th>Other Branches</th><th>HQ Reports</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {[
+                        { user: 'Ahmed Al Rashidi', branch: 'Downtown',  role: 'Manager',       own: '✅', other: '🚫', hq: '🚫', ok: true  },
+                        { user: 'Priya Nair',        branch: 'Marina',    role: 'Cashier',       own: '✅', other: '🚫', hq: '🚫', ok: true  },
+                        { user: 'Carlos Mendez',     branch: 'All',       role: 'HQ Admin',      own: '✅', other: '✅', hq: '✅', ok: true  },
+                        { user: 'Sara Malik',        branch: 'JBR',       role: 'Kitchen Staff', own: '✅', other: '🚫', hq: '🚫', ok: true  },
+                        { user: 'James Okafor',      branch: 'Downtown',  role: 'Waiter',        own: '✅', other: '🚫', hq: '🚫', ok: true  },
+                      ].map((r, i) => (
+                        <tr key={i}>
+                          <td className="font-semibold text-slate-800">{r.user}</td>
+                          <td className="text-xs text-slate-500">{r.branch}</td>
+                          <td><span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.role}</span></td>
+                          <td className="text-center text-sm">{r.own}</td>
+                          <td className="text-center text-sm">{r.other}</td>
+                          <td className="text-center text-sm">{r.hq}</td>
+                          <td><span className={`status-badge ${r.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{r.ok ? 'pass' : 'fail'}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <p className="text-sm font-bold text-slate-700 mb-3">Isolation Architecture</p>
+                <div className="grid sm:grid-cols-2 gap-3 text-xs">
+                  {[
+                    { label: 'DB Schema', desc: 'Each branch uses a prefixed schema (branch_1_, branch_2_). Row-level security enforced via Postgres RLS policies.', ok: true },
+                    { label: 'API Gateway', desc: 'JWT token contains branchId claim. Middleware rejects cross-branch requests with HTTP 403.', ok: true },
+                    { label: 'Socket.IO Rooms', desc: 'Each branch socket joins room `branch:{id}`. Events are namespaced and cannot bleed across rooms.', ok: true },
+                    { label: 'Report Aggregation', desc: 'HQ admins can query all branches using `?branch=all`. Branch managers restricted to own branchId.', ok: true },
+                  ].map(item => (
+                    <div key={item.label} className="flex gap-3 items-start rounded-lg bg-white border border-slate-200 p-3">
+                      <span className="text-lg">{item.ok ? '✅' : '❌'}</span>
+                      <div>
+                        <p className="font-bold text-slate-700">{item.label}</p>
+                        <p className="text-slate-500 leading-relaxed">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

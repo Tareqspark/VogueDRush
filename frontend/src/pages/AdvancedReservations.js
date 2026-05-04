@@ -1,7 +1,24 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 const TABS = ['Floor Map', 'Bookings', 'Deposits', 'Waitlist', 'Analytics'];
+
+const PATH_MAP = {
+  '':          'Floor Map',
+  'floor-map': 'Floor Map',
+  'book':      'Bookings',
+  'deposits':  'Deposits',
+  'waitlist':  'Waitlist',
+  'analytics': 'Analytics',
+};
+const TAB_PATH = {
+  'Floor Map':  '',
+  'Bookings':   'book',
+  'Deposits':   'deposits',
+  'Waitlist':   'waitlist',
+  'Analytics':  'analytics',
+};
 
 // Floor plan: rows × columns of "zones"
 const FLOOR_TABLES = [
@@ -56,7 +73,11 @@ const BOOKING_STYLE = {
 };
 
 export default function AdvancedReservations() {
-  const [tab, setTab] = useState('Floor Map');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const subPath  = location.pathname.replace(/^\/advanced-reservations\/?/, '');
+  const tab      = PATH_MAP[subPath] || 'Floor Map';
+  const setTab   = (t) => navigate(TAB_PATH[t] ? `/advanced-reservations/${TAB_PATH[t]}` : '/advanced-reservations');
 
   const todayBookings = BOOKINGS.filter(b => b.date === '2026-05-05').length;
   const noShowCount   = BOOKINGS.filter(b => b.status === 'no_show').length;
