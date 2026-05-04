@@ -156,6 +156,121 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── Static sub-resource routes MUST come before /:id to avoid param capture ──
+
+// Get order statistics
+router.get('/stats/overview', async (req, res) => {
+  try {
+    const { query } = require('../config/database');
+    const { start_date, end_date } = req.query;
+
+    let dateFilter = '';
+    let values = [];
+
+    if (start_date && end_date) {
+      dateFilter = 'WHERE DATE(created_at) BETWEEN ? AND ?';
+      values = [start_date, end_date];
+    }
+
+    const statusStats = await query(`
+      SELECT status, COUNT(*) as count,
+             SUM(total_amount) as total_revenue
+      FROM orders
+      ${dateFilter}
+      GROUP BY status
+    `, values);
+
+    const typeStats = await query(`
+      SELECT order_type, COUNT(*) as count,
+             SUM(total_amount) as total_revenue
+      FROM orders
+      ${dateFilter}
+      GROUP BY order_type
+    `, values);
+
+    const todayStats = await query(
+      `SELECT COUNT(*) as today_orders, SUM(total_amount) as today_revenue
+       FROM orders WHERE DATE(created_at) = CURDATE()`
+    );
+
+    res.json({ statusStats, typeStats, todayStats: todayStats[0] });
+  } catch (error) {
+    console.error('Get order stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch order statistics' });
+  }
+});
+
+// Receipt history (admin management view)
+router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
+  try {
+    const { page = 1, limit = 100, start_date, end_date } = req.query;
+    const limitInt = parseInt(limit) || 100;
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    let whereClause = 'o.bill_printed = 1';
+    const values = [];
+
+    if (start_date) { whereClause += ' AND DATE(o.bill_printed_at) >= ?'; values.push(start_date); }
+    if (end_date)   { whereClause += ' AND DATE(o.bill_printed_at) <= ?'; values.push(end_date); }
+
+    const { query: dbQuery } = require('../config/database');
+    const rows = await dbQuery(
+      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone,
+              o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
+              o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
+              p.payment_method, p.transaction_id, p.amount AS paid_amount, p.created_at AS payment_time
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.waiter_id
+       LEFT JOIN tables t ON t.id = o.table_id
+       LEFT JOIN payments p ON p.id = (
+         SELECT p2.id FROM payments p2 WHERE p2.order_id = o.id AND p2.status = 'completed'
+         ORDER BY p2.created_at DESC LIMIT 1
+       )
+       WHERE ${whereClause}
+       ORDER BY o.bill_printed_at DESC
+       LIMIT ? OFFSET ?`,
+      [...values, limitInt, offsetInt]
+    );
+    res.json({ receipts: rows, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Receipt history error:', error);
+    res.status(500).json({ error: 'Failed to fetch receipt history' });
+  }
+});
+
+// Transaction report for admin (cards/mobile wallet details)
+router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
+  try {
+    const { page = 1, limit = 100, start_date, end_date } = req.query;
+    const limitInt = parseInt(limit) || 100;
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    let whereClause = "p.status = 'completed'";
+    const values = [];
+
+    if (start_date) { whereClause += ' AND DATE(p.created_at) >= ?'; values.push(start_date); }
+    if (end_date)   { whereClause += ' AND DATE(p.created_at) <= ?'; values.push(end_date); }
+
+    const { query: dbQuery } = require('../config/database');
+    const txns = await dbQuery(
+      `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
+              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount,
+              o.customer_name, o.customer_phone, u.full_name AS waiter_name
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       LEFT JOIN users u ON u.id = o.waiter_id
+       WHERE ${whereClause}
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...values, limitInt, offsetInt]
+    );
+    res.json({ transactions: txns, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Transaction report error:', error);
+    res.status(500).json({ error: 'Failed to fetch transactions report' });
+  }
+});
+
+// ── Parameterised route — must stay after all static GET sub-paths ──
+
 // Get order by ID with items
 router.get('/:id', validateId, async (req, res) => {
   try {
@@ -547,16 +662,24 @@ router.post('/:id/payments', validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { payment_method, amount, transaction_id } = req.body;
-    
-    const validMethods = ['cash', 'bkash', 'card'];
+
+    const validMethods = ['cash', 'bkash', 'nagad', 'card'];
     if (!validMethods.includes(payment_method)) {
       return res.status(400).json({ error: 'Invalid payment method' });
     }
-    
+
     // Check if order exists
     const order = await findOne('orders', { id });
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // C-4: Block payments on orders that already have a printed bill
+    if (order.bill_printed) {
+      return res.status(400).json({
+        error: 'Order is locked — bill has been printed. Use the bill endpoint to process payment.',
+        code: 'ORDER_LOCKED'
+      });
     }
     
     // Check if payment amount is valid
@@ -614,59 +737,6 @@ router.post('/:id/payments', validateId, async (req, res) => {
   } catch (error) {
     console.error('Add payment error:', error);
     res.status(500).json({ error: 'Failed to add payment' });
-  }
-});
-
-// Get order statistics
-router.get('/stats/overview', async (req, res) => {
-  try {
-    const { query } = require('../config/database');
-    const { start_date, end_date } = req.query;
-    
-    let dateFilter = '';
-    let values = [];
-    
-    if (start_date && end_date) {
-      dateFilter = 'WHERE DATE(created_at) BETWEEN ? AND ?';
-      values = [start_date, end_date];
-    }
-    
-    // Get order counts by status
-    const statusStats = await query(`
-      SELECT status, COUNT(*) as count, 
-             SUM(total_amount) as total_revenue
-      FROM orders 
-      ${dateFilter}
-      GROUP BY status
-    `, values);
-    
-    // Get order counts by type
-    const typeStats = await query(`
-      SELECT order_type, COUNT(*) as count,
-             SUM(total_amount) as total_revenue
-      FROM orders 
-      ${dateFilter}
-      GROUP BY order_type
-    `, values);
-    
-    // Get today's stats
-    const todayQuery = dateFilter ? 
-      `SELECT COUNT(*) as today_orders, SUM(total_amount) as today_revenue 
-       FROM orders WHERE DATE(created_at) = CURDATE()` :
-      `SELECT COUNT(*) as today_orders, SUM(total_amount) as today_revenue 
-       FROM orders WHERE DATE(created_at) = CURDATE()`;
-    
-    const todayStats = await query(todayQuery);
-    
-    res.json({
-      statusStats,
-      typeStats,
-      todayStats: todayStats[0]
-    });
-    
-  } catch (error) {
-    console.error('Get order stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch order statistics' });
   }
 });
 
@@ -825,13 +895,12 @@ router.post('/:id/bill', validateId, async (req, res) => {
       await update('tables', { status: 'available', updated_at: new Date() }, { id: order.table_id });
     }
 
-    // Persist payment record (nagad is stored as bkash method with prefixed transaction id)
-    const storedMethod = payment_method === 'nagad' ? 'bkash' : payment_method;
+    // Persist payment record
     const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
-    const txnPrefix = payment_method === 'nagad' ? 'NAGAD' : payment_method.toUpperCase();
+    const txnPrefix = payment_method.toUpperCase();
     await insert('payments', {
       order_id: parseInt(id),
-      payment_method: storedMethod,
+      payment_method: payment_method, // stored exactly as given — ENUM now includes 'nagad'
       amount: adjustedTotal,
       transaction_id: payment_last4 ? `${txnPrefix}${txnSuffix}` : null,
       status: 'completed'
@@ -879,89 +948,6 @@ router.post('/:id/bill', validateId, async (req, res) => {
   } catch (error) {
     console.error('Print bill error:', error);
     res.status(500).json({ error: 'Failed to print bill' });
-  }
-});
-
-// Receipt history (admin management view)
-router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
-  try {
-    const { page = 1, limit = 100, start_date, end_date } = req.query;
-    const limitInt = parseInt(limit) || 100;
-    const offsetInt = (parseInt(page) - 1) * limitInt;
-    let whereClause = 'o.bill_printed = 1';
-    const values = [];
-
-    if (start_date) {
-      whereClause += ' AND DATE(o.bill_printed_at) >= ?';
-      values.push(start_date);
-    }
-    if (end_date) {
-      whereClause += ' AND DATE(o.bill_printed_at) <= ?';
-      values.push(end_date);
-    }
-
-    const { query: dbQuery } = require('../config/database');
-    const rows = await dbQuery(
-      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone,
-              o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
-              o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
-              p.payment_method, p.transaction_id, p.amount AS paid_amount, p.created_at AS payment_time
-       FROM orders o
-       LEFT JOIN users u ON u.id = o.waiter_id
-       LEFT JOIN tables t ON t.id = o.table_id
-       LEFT JOIN payments p ON p.id = (
-         SELECT p2.id FROM payments p2 WHERE p2.order_id = o.id AND p2.status = 'completed'
-         ORDER BY p2.created_at DESC LIMIT 1
-       )
-       WHERE ${whereClause}
-       ORDER BY o.bill_printed_at DESC
-       LIMIT ? OFFSET ?`,
-      [...values, limitInt, offsetInt]
-    );
-
-    res.json({ receipts: rows, page: parseInt(page), limit: limitInt });
-  } catch (error) {
-    console.error('Receipt history error:', error);
-    res.status(500).json({ error: 'Failed to fetch receipt history' });
-  }
-});
-
-// Transaction report for admin (cards/mobile wallet details)
-router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
-  try {
-    const { page = 1, limit = 100, start_date, end_date } = req.query;
-    const limitInt = parseInt(limit) || 100;
-    const offsetInt = (parseInt(page) - 1) * limitInt;
-    let whereClause = 'p.status = \'completed\'';
-    const values = [];
-
-    if (start_date) {
-      whereClause += ' AND DATE(p.created_at) >= ?';
-      values.push(start_date);
-    }
-    if (end_date) {
-      whereClause += ' AND DATE(p.created_at) <= ?';
-      values.push(end_date);
-    }
-
-    const { query: dbQuery } = require('../config/database');
-    const txns = await dbQuery(
-      `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
-              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount,
-              o.customer_name, o.customer_phone, u.full_name AS waiter_name
-       FROM payments p
-       JOIN orders o ON o.id = p.order_id
-       LEFT JOIN users u ON u.id = o.waiter_id
-       WHERE ${whereClause}
-       ORDER BY p.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...values, limitInt, offsetInt]
-    );
-
-    res.json({ transactions: txns, page: parseInt(page), limit: limitInt });
-  } catch (error) {
-    console.error('Transaction report error:', error);
-    res.status(500).json({ error: 'Failed to fetch transactions report' });
   }
 });
 

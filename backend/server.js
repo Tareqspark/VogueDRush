@@ -76,8 +76,26 @@ if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
 }
 
 // CORS must come before helmet so preflight OPTIONS requests are handled correctly
+const allowedOrigins = process.env.FRONTEND_URL
+  ? [process.env.FRONTEND_URL]
+  : null; // null = local-only mode
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || true, // true = reflect request origin (safe for local dev)
+  origin: (origin, callback) => {
+    // Allow non-browser requests (curl, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    // In production with FRONTEND_URL set, only allow that exact origin
+    if (allowedOrigins) {
+      return allowedOrigins.includes(origin)
+        ? callback(null, true)
+        : callback(new Error('Not allowed by CORS'));
+    }
+    // Development: allow any localhost / 127.0.0.1 origin
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 

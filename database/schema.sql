@@ -13,7 +13,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100) NOT NULL,
     phone VARCHAR(20),
-    role ENUM('admin', 'waiter') NOT NULL DEFAULT 'waiter',
+    role ENUM('admin', 'waiter', 'kitchen') NOT NULL DEFAULT 'waiter',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -86,6 +86,8 @@ CREATE TABLE orders (
     service_charge DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    bill_printed BOOLEAN DEFAULT FALSE,
+    bill_printed_at TIMESTAMP NULL,
     special_instructions TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -125,7 +127,7 @@ CREATE TABLE order_items (
 CREATE TABLE payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT NOT NULL,
-    payment_method ENUM('cash', 'bkash', 'card') NOT NULL,
+    payment_method ENUM('cash', 'bkash', 'nagad', 'card') NOT NULL,
     amount DECIMAL(10,2) NOT NULL,
     transaction_id VARCHAR(100),
     status ENUM('pending', 'completed', 'failed', 'refunded') DEFAULT 'pending',
@@ -282,7 +284,8 @@ INSERT INTO system_settings (setting_key, setting_value, description, data_type)
 
 -- Insert default admin user (password: admin123)
 INSERT INTO users (username, email, password_hash, full_name, role) VALUES
-('admin', 'admin@foodpark.com', '$2b$10$rQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY5uKx4vJ2x/.vQZ8kHWKtGY', 'System Administrator', 'admin');
+-- Default password is: Admin@1234  (hash generated with bcrypt cost 10)
+('admin', 'admin@foodpark.com', '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWu', 'System Administrator', 'admin');
 
 -- Insert default food categories
 INSERT INTO food_categories (name, description, icon, display_order) VALUES

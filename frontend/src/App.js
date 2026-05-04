@@ -25,6 +25,7 @@ const Users = lazy(() => import('./pages/Users'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Profile = lazy(() => import('./pages/Profile'));
+const Changelog = lazy(() => import('./pages/Changelog'));
 
 // Create React Query client with enhanced configuration
 const queryClient = new QueryClient({
@@ -296,6 +297,18 @@ const AppContent = () => {
                       <ProtectedRoute>
                         <Layout>
                           <Profile />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Change Log - accessible to all roles */}
+                  <Route
+                    path="/changelog"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Changelog />
                         </Layout>
                       </ProtectedRoute>
                     }

@@ -11,6 +11,7 @@ import {
   ChartBarIcon,
   CogIcon,
   UserIcon,
+  DocumentTextIcon,
   XMarkIcon,
   CalendarDaysIcon,
   ArrowRightOnRectangleIcon,
@@ -27,6 +28,7 @@ const NAV_SECTIONS = [
       { name: 'Tables',       href: '/tables',       icon: RectangleGroupIcon,  roles: ['admin', 'waiter'] },
       { name: 'Reservations', href: '/reservations', icon: CalendarDaysIcon,    roles: ['admin', 'waiter'] },
       { name: 'Delivery',     href: '/delivery',     icon: TruckIcon,           roles: ['admin', 'waiter'] },
+      { name: 'Change Log',   href: '/changelog',    icon: DocumentTextIcon,    roles: ['admin', 'waiter', 'kitchen'] },
     ],
   },
   {
