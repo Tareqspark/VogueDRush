@@ -207,6 +207,16 @@ const insert = async (table, data) => {
   return { id: result.insertId, ...data };
 };
 
+// Insert record, silently ignore duplicate key violations
+const insertIgnore = async (table, data) => {
+  const fields = Object.keys(data).join(', ');
+  const placeholders = Object.keys(data).map(() => '?').join(', ');
+  const values = Object.values(data);
+  const sql = `INSERT IGNORE INTO ${table} (${fields}) VALUES (${placeholders})`;
+  const result = await query(sql, values);
+  return { id: result.insertId, ...data };
+};
+
 // Update record
 const update = async (table, data, conditions) => {
   const setClause = Object.keys(data).map(key => `${key} = ?`).join(', ');
@@ -240,6 +250,7 @@ module.exports = {
   findOne,
   findMany,
   insert,
+  insertIgnore,
   update,
   remove,
   testConnection,

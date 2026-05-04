@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { findOne, insert, update, remove, query } = require('../config/database');
+const { findOne, insert, insertIgnore, update, remove, query } = require('../config/database');
 
 // JWT token generation with JTI for blacklisting
 const generateTokens = async (payload, userDeviceInfo = null) => {
@@ -205,7 +205,7 @@ const refreshToken = async (req, res) => {
       
       // Blacklist old refresh token
       const oldTokenExpiry = new Date(user.exp * 1000);
-      await insert('token_blacklist', {
+      await insertIgnore('token_blacklist', {
         token_jti: user.jti,
         token_type: 'refresh',
         user_id: user.id,
@@ -296,7 +296,7 @@ const logout = async (req, res) => {
     
     if (session) {
       // Blacklist refresh token
-      await insert('token_blacklist', {
+      await insertIgnore('token_blacklist', {
         token_jti: session.refresh_token_jti,
         token_type: 'refresh',
         user_id: userId,
@@ -315,7 +315,7 @@ const logout = async (req, res) => {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         if (decoded.jti) {
-          await insert('token_blacklist', {
+          await insertIgnore('token_blacklist', {
             token_jti: decoded.jti,
             token_type: 'access',
             user_id: userId,
