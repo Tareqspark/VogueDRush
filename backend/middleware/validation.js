@@ -36,8 +36,8 @@ const validateUser = [
     .isMobilePhone()
     .withMessage('Valid phone number is required'),
   body('role')
-    .isIn(['admin', 'waiter'])
-    .withMessage('Role must be either admin or waiter'),
+    .isIn(['admin', 'waiter', 'kitchen'])
+    .withMessage('Role must be admin, waiter, or kitchen'),
   body('password')
     .if(body('password').exists())
     .isLength({ min: 6 })
@@ -191,7 +191,16 @@ const validateReservation = [
     }),
   body('reservation_time')
     .matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
-    .withMessage('Valid time format is HH:MM'),
+    .withMessage('Valid time format is HH:MM')
+    .custom((value) => {
+      // M-6: enforce DB constraint at application layer — 10:00 to 23:00
+      const [hours, minutes] = value.split(':').map(Number);
+      const totalMinutes = hours * 60 + minutes;
+      if (totalMinutes < 10 * 60 || totalMinutes > 23 * 60) {
+        throw new Error('Reservation time must be between 10:00 and 23:00');
+      }
+      return true;
+    }),
   body('special_requests')
     .optional()
     .isLength({ max: 500 })

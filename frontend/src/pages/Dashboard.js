@@ -178,14 +178,27 @@ const Dashboard = () => {
     );
   }
 
-  // Prepare dashboard data
+  // Prepare dashboard data (M-12: compute real trends from yesterdayStats)
   const todayStats = orderStats?.todayStats || {};
+  const yesterdayStats = orderStats?.yesterdayStats || {};
   const statusStats = orderStats?.statusStats || [];
   const typeStats = orderStats?.typeStats || [];
+  
+  // Compute real trend percentages
+  const todayRevenue = parseFloat(todayStats.today_revenue || 0);
+  const yesterdayRevenue = parseFloat(yesterdayStats.yesterday_revenue || 0);
+  const revenueTrend = yesterdayRevenue > 0 
+    ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100 * 10) / 10 
+    : null;
+    
+  const todayOrders = parseInt(todayStats.today_orders || 0);
+  const yesterdayOrders = parseInt(yesterdayStats.yesterday_orders || 0);
+  const ordersTrend = yesterdayOrders > 0
+    ? Math.round(((todayOrders - yesterdayOrders) / yesterdayOrders) * 100 * 10) / 10
+    : null;
+  
   const tableOccupancy = tableStats?.todayOccupancy || {};
   const kitchenWorkload = kitchenStats?.currentWorkload || {};
-  const revenueTrend = 5.2;
-  const ordersTrend = -2.1;
   const soldByName = (menuPerfData?.item_performance || []).slice(0, 7).map(item => ({
     name: item.item_name,
     sold: parseInt(item.total_quantity || 0, 10),

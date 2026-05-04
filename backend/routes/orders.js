@@ -1,5 +1,5 @@
 const express = require('express');
-const { findOne, findMany, insert, update, remove, transaction, transactionWithIsolation } = require('../config/database');
+const { findOne, findMany, insert, update, remove, transaction, transactionWithIsolation, query } = require('../config/database');
 const { requireRole } = require('../middleware/auth');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { validateOrder, validateId } = require('../middleware/validation');
@@ -7,19 +7,18 @@ const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
-// Generate unique order number
+// Generate unique order number — 4-digit random reduces birthday-paradox collision risk
 const generateOrderNumber = () => {
   const date = new Date();
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  const random = (Math.floor(Math.random() * 9000) + 1000).toString(); // 1000-9999
   return `ORD${year}${month}${day}${random}`;
 };
 
-// Calculate order totals
+// Calculate order totals (M-4: applies delivery_fee from settings for delivery orders)
 const calculateOrderTotals = async (items, orderType) => {
-  const { query } = require('../config/database');
   let subtotal = 0;
   let totalVat = 0;
   
@@ -44,16 +43,17 @@ const calculateOrderTotals = async (items, orderType) => {
     settingsMap[setting.setting_key] = setting.setting_value;
   });
   
-  const vatPercentage = parseFloat(settingsMap.vat_percentage || 15);
   const serviceChargePercentage = orderType === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
+  const deliveryFee = orderType === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;
   
   const serviceCharge = (subtotal * serviceChargePercentage) / 100;
-  const totalAmount = subtotal + totalVat + serviceCharge;
+  const totalAmount = subtotal + totalVat + serviceCharge + deliveryFee;
   
   return {
     subtotal,
     vat_amount: totalVat,
     service_charge: serviceCharge,
+    delivery_fee: deliveryFee,
     discount_amount: 0,
     total_amount: totalAmount
   };
@@ -77,7 +77,6 @@ router.get('/', async (req, res) => {
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
-    
     if (status) {
       whereClause += ' AND o.status = ?';
       values.push(status);
@@ -107,8 +106,6 @@ router.get('/', async (req, res) => {
       whereClause += ' AND DATE(o.created_at) <= ?';
       values.push(end_date);
     }
-    
-    const { query } = require('../config/database');
     
     // Get orders with joins
     const ordersQuery = `
@@ -158,10 +155,9 @@ router.get('/', async (req, res) => {
 
 // ── Static sub-resource routes MUST come before /:id to avoid param capture ──
 
-// Get order statistics
+// Get order statistics with yesterday comparison for trend indicators (M-12)
 router.get('/stats/overview', async (req, res) => {
   try {
-    const { query } = require('../config/database');
     const { start_date, end_date } = req.query;
 
     let dateFilter = '';
@@ -189,11 +185,16 @@ router.get('/stats/overview', async (req, res) => {
     `, values);
 
     const todayStats = await query(
-      `SELECT COUNT(*) as today_orders, SUM(total_amount) as today_revenue
+      `SELECT COUNT(*) as today_orders, COALESCE(SUM(total_amount), 0) as today_revenue
        FROM orders WHERE DATE(created_at) = CURDATE()`
     );
 
-    res.json({ statusStats, typeStats, todayStats: todayStats[0] });
+    const yesterdayStats = await query(
+      `SELECT COUNT(*) as yesterday_orders, COALESCE(SUM(total_amount), 0) as yesterday_revenue
+       FROM orders WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)`
+    );
+
+    res.json({ statusStats, typeStats, todayStats: todayStats[0], yesterdayStats: yesterdayStats[0] });
   } catch (error) {
     console.error('Get order stats error:', error);
     res.status(500).json({ error: 'Failed to fetch order statistics' });
@@ -212,8 +213,7 @@ router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
     if (start_date) { whereClause += ' AND DATE(o.bill_printed_at) >= ?'; values.push(start_date); }
     if (end_date)   { whereClause += ' AND DATE(o.bill_printed_at) <= ?'; values.push(end_date); }
 
-    const { query: dbQuery } = require('../config/database');
-    const rows = await dbQuery(
+    const rows = await query(
       `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone,
               o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
               o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
@@ -249,8 +249,7 @@ router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
     if (start_date) { whereClause += ' AND DATE(p.created_at) >= ?'; values.push(start_date); }
     if (end_date)   { whereClause += ' AND DATE(p.created_at) <= ?'; values.push(end_date); }
 
-    const { query: dbQuery } = require('../config/database');
-    const txns = await dbQuery(
+    const txns = await query(
       `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
               o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount,
               o.customer_name, o.customer_phone, u.full_name AS waiter_name
@@ -275,8 +274,6 @@ router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
 router.get('/:id', validateId, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const { query } = require('../config/database');
     
     // Get order details
     const orderQuery = `
@@ -353,8 +350,11 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       delivery_details 
     } = req.body;
     
-    // Use transaction with proper isolation level
-    const result = await transactionWithIsolation(async (connection) => {
+    // M-5: Retry up to 3 times on order_number collision (ER_DUP_ENTRY)
+    let result;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await transactionWithIsolation(async (connection) => {
       // Validate table availability for dine-in with pessimistic locking
       if (order_type === 'dine_in' && table_id) {
         const [tableRows] = await connection.query(
@@ -476,43 +476,35 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       
       // Insert delivery details if applicable
       if (order_type === 'delivery' && delivery_details) {
-        const deliveryNotes = [
-          delivery_details.delivery_notes || null,
-          delivery_details.order_time ? `Order Time: ${delivery_details.order_time}` : null,
-          delivery_details.delivery_time ? `Delivery Time: ${delivery_details.delivery_time}` : null,
-        ].filter(Boolean).join(' | ') || null;
-
+        // M-1: Store order_time / delivery_time in proper TIME columns (not as a string)
         const deliveryData = {
           order_id: orderId,
           customer_address: delivery_details.customer_address || null,
           delivery_phone: delivery_details.delivery_phone || customer_phone || null,
           advance_payment: delivery_details.advance_payment || 0.00,
           due_amount: delivery_details.due_amount || 0.00,
-          delivery_notes: deliveryNotes
+          order_time: delivery_details.order_time || null,
+          delivery_time: delivery_details.delivery_time || null,
+          delivery_notes: delivery_details.delivery_notes || null
         };
         
-        const [deliveryResult] = await connection.query(
+        await connection.query(
           `INSERT INTO delivery_details (${Object.keys(deliveryData).join(', ')}) 
            VALUES (${Object.keys(deliveryData).map(() => '?').join(', ')})`,
           Object.values(deliveryData)
         );
-        
-        // Create delivery tracking record
-        const trackingData = {
-          delivery_detail_id: deliveryResult.insertId,
-          current_status: 'pending',
-          estimated_delivery_time: new Date(Date.now() + 45 * 60 * 1000) // 45 minutes from now
-        };
-        
-        await connection.query(
-          `INSERT INTO delivery_tracking (${Object.keys(trackingData).join(', ')}) 
-           VALUES (${Object.keys(trackingData).map(() => '?').join(', ')})`,
-          Object.values(trackingData)
-        );
+        // M-10: delivery_tracking table has no backend routes or UI — skip the dead INSERT
       }
       
       return orderId;
     }, 'SERIALIZABLE'); // Use highest isolation level to prevent race conditions
+        break; // success — exit retry loop
+      } catch (txErr) {
+        // M-5: Retry only on duplicate order_number; rethrow anything else
+        if (txErr.code === 'ER_DUP_ENTRY' && attempt < 2) continue;
+        throw txErr;
+      }
+    }
     
     // Fetch the created order with all details
     const order = await findOne('orders', { id: result });
@@ -586,6 +578,25 @@ router.patch('/:id/status', validateId, async (req, res) => {
       }
       if (!reason || !String(reason).trim()) {
         return res.status(400).json({ error: 'Cancellation reason is required' });
+      }
+    }
+
+    // M-3: Enforce valid state transitions; admin can override
+    const ALLOWED_TRANSITIONS = {
+      pending:   ['preparing', 'cancelled'],
+      preparing: ['ready', 'cancelled'],
+      ready:     ['done', 'cancelled'],
+      done:      [],
+      cancelled: []
+    };
+    if (req.user.role !== 'admin') {
+      const allowed = ALLOWED_TRANSITIONS[order.status] || [];
+      if (!allowed.includes(status)) {
+        return res.status(400).json({
+          error: `Cannot transition from '${order.status}' to '${status}'`,
+          code: 'INVALID_TRANSITION',
+          allowed_transitions: allowed
+        });
       }
     }
     
@@ -746,8 +757,6 @@ router.put('/:id/items', validateId, async (req, res) => {
     const { id } = req.params;
     const { add_items = [], remove_item_ids = [] } = req.body;
 
-    const { query: dbQuery } = require('../config/database');
-
     // Load order
     const order = await findOne('orders', { id });
     if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -812,21 +821,27 @@ router.put('/:id/items', validateId, async (req, res) => {
         vatAmount += (parseFloat(ai.total_price) * parseFloat(ai.vat_rate)) / 100;
       }
 
-      const [settings] = await conn.query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('service_charge_percentage')");
-      const svcPct = order.order_type === 'dine_in' ? parseFloat(settings[0]?.setting_value || 10) : 0;
+      // M-4: also apply delivery_fee on recalculation
+      const [settingsRows] = await conn.query(
+        "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('service_charge_percentage', 'delivery_fee')"
+      );
+      const settingsMap = {};
+      settingsRows.forEach(r => { settingsMap[r.setting_key] = r.setting_value; });
+
+      const svcPct = order.order_type === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
+      const deliveryFee = order.order_type === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;
       const serviceCharge = (subtotal * svcPct) / 100;
-      const totalAmount = subtotal + vatAmount + serviceCharge;
+      const totalAmount = subtotal + vatAmount + serviceCharge + deliveryFee;
 
       await conn.query(
-        'UPDATE orders SET subtotal=?, vat_amount=?, service_charge=?, total_amount=?, updated_at=NOW() WHERE id=?',
-        [subtotal, vatAmount, serviceCharge, totalAmount, id]
+        'UPDATE orders SET subtotal=?, vat_amount=?, service_charge=?, delivery_fee=?, total_amount=?, updated_at=NOW() WHERE id=?',
+        [subtotal, vatAmount, serviceCharge, deliveryFee, totalAmount, id]
       );
     });
 
     // Return updated order
     const updatedOrder = await findOne('orders', { id });
-    const { query: q } = require('../config/database');
-    const items = await q(
+    const items = await query(
       "SELECT oi.*, fi.name as item_name FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ?",
       [id]
     );
@@ -907,9 +922,8 @@ router.post('/:id/bill', validateId, async (req, res) => {
     });
 
     // Fetch full bill data
-    const { query: dbQuery } = require('../config/database');
     const updatedOrder = await findOne('orders', { id });
-    const items = await dbQuery(
+    const items = await query(
       "SELECT oi.*, fi.name as item_name FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ? AND oi.status != 'cancelled'",
       [id]
     );
@@ -948,6 +962,46 @@ router.post('/:id/bill', validateId, async (req, res) => {
   } catch (error) {
     console.error('Print bill error:', error);
     res.status(500).json({ error: 'Failed to print bill' });
+  }
+});
+
+// M-11: Admin unlock — clears the bill_printed flag so an accidentally printed bill can be corrected
+router.patch('/:id/unlock-bill', validateId, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (!order.bill_printed) {
+      return res.status(400).json({ error: 'Order bill has not been printed — nothing to unlock' });
+    }
+
+    await update('orders', {
+      bill_printed: false,
+      bill_printed_at: null,
+      status: 'ready',
+      updated_at: new Date()
+    }, { id });
+
+    // Delete the payment record created when bill was printed
+    await query(
+      "DELETE FROM payments WHERE order_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
+      [id]
+    );
+
+    await logManualAudit(
+      req.user.id, 'unlock_bill', 'orders', parseInt(id),
+      { bill_printed: true },
+      { bill_printed: false, unlocked_by: req.user.username },
+      req.ip, req.headers['user-agent']
+    );
+
+    const io = req.app.get('io');
+    if (io) io.emit('order-unlocked', { orderId: parseInt(id), unlockedBy: req.user.username });
+
+    res.json({ message: 'Bill lock removed. Order is back to ready status.', order_id: parseInt(id) });
+  } catch (error) {
+    console.error('Unlock bill error:', error);
+    res.status(500).json({ error: 'Failed to unlock bill' });
   }
 });
 

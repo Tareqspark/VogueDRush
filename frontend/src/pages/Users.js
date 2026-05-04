@@ -69,13 +69,13 @@ export default function Users() {
         <div className="grid gap-3">
           {users.map(user => (
             <div key={user.id} className="card p-4 flex items-center gap-4">
-              <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${user.role === 'admin' ? 'bg-sky-100 text-sky-600' : 'bg-sky-100 text-sky-600'}`}>
+              <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${user.role === 'admin' ? 'bg-sky-100 text-sky-600' : user.role === 'kitchen' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
                 {user.full_name?.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-slate-800">{user.full_name}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded capitalize font-medium ${user.role === 'admin' ? 'bg-sky-100 text-sky-600' : 'bg-sky-100 text-sky-600'}`}>{user.role}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded capitalize font-medium ${user.role === 'admin' ? 'bg-sky-100 text-sky-600' : user.role === 'kitchen' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>{user.role}</span>
                   {!user.is_active && <span className="text-xs bg-rose-50 text-rose-600 px-2 py-0.5 rounded">Inactive</span>}
                 </div>
                 <div className="text-sm text-slate-600">@{user.username} · {user.email}</div>
@@ -155,6 +155,7 @@ function UserModal({ api, user, onClose, onSaved }) {
               <select className="select" value={form.role} onChange={e => setForm(p => ({...p, role: e.target.value}))}>
                 <option value="waiter">Waiter</option>
                 <option value="admin">Admin</option>
+                <option value="kitchen">Kitchen</option>
               </select>
             </div>
           </div>

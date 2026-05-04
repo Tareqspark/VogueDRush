@@ -15,6 +15,7 @@ const logAudit = async (req, res, next) => {
       const auditableOperations = [
         { method: 'post', paths: ['/api/users', '/api/orders', '/api/reservations', '/api/menu/items'] },
         { method: 'put', paths: ['/api/users', '/api/orders', '/api/reservations', '/api/menu/items', '/api/tables'] },
+        { method: 'patch', paths: ['/api/orders', '/api/delivery', '/api/tables', '/api/reservations', '/api/kitchen'] },
         { method: 'delete', paths: ['/api/users', '/api/orders', '/api/reservations', '/api/menu/items', '/api/tables'] }
       ];
       

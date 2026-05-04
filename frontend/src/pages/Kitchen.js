@@ -186,7 +186,7 @@ export default function Kitchen() {
                         <span className="text-xs font-semibold bg-sky-50 text-sky-600 px-2 py-0.5 rounded-full border border-sky-200">Delivery</span>
                       )}
                       {order.order_type === 'direct' && (
-                        <span className="text-xs font-semibold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full border border-violet-200">Direct</span>
+                        <span className="text-xs font-semibold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full border border-violet-200">Takeaway</span>
                       )}
                     </div>
                     <div className="text-xs text-slate-400 font-medium mt-1">by {order.waiter_full_name}</div>
