@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { XMarkIcon } from '@heroicons/react/24/outline';
 import {
   CurrencyDollarIcon,
   ShoppingCartIcon,
@@ -26,6 +27,14 @@ const Dashboard = () => {
   const [selectedPeriod] = useState('today');
   const [tab, setTab] = useState('overview');
   const [drill, setDrill] = useState(null);
+  const [viewingOrder, setViewingOrder] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+
+  const { data: viewingOrderDetail } = useQuery(
+    ['dash-order-detail', viewingOrder],
+    () => api.get(`/orders/${viewingOrder}`).then(r => r.data),
+    { enabled: !!viewingOrder }
+  );
 
   // Fetch dashboard statistics
   const {
@@ -202,6 +211,10 @@ const Dashboard = () => {
   const soldByName = (menuPerfData?.item_performance || []).slice(0, 7).map(item => ({
     name: item.item_name,
     sold: parseInt(item.total_quantity || 0, 10),
+    revenue: Math.round(parseFloat(item.total_revenue || 0)),
+    orders: parseInt(item.orders_count || 0, 10),
+    category: item.category_name || '',
+    cancelledCount: parseInt(item.cancelled_count || 0, 10),
   }));
   const soldByCategory = (menuPerfData?.category_performance || []).slice(0, 7).map(cat => ({
     name: cat.category_name,
@@ -352,12 +365,15 @@ const Dashboard = () => {
           </div>
           <div className="space-y-2">
             {(drillOrders?.orders || []).map((o) => (
-              <button key={o.id} onClick={() => navigate('/orders')} className="w-full text-left rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
+              <button key={o.id} onClick={() => setViewingOrder(o.id)} className="w-full text-left rounded-lg border border-slate-100 p-3 hover:bg-sky-50 hover:border-sky-200 transition-colors">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm font-bold text-slate-700">{o.order_number}</div>
-                  <div className="text-xs text-slate-500 capitalize">{o.order_type === 'direct' ? 'Takeway' : o.order_type}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-slate-500 capitalize">{o.order_type === 'direct' ? 'Takeway' : o.order_type}</div>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">View</span>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 mt-1">Status: {o.status} {o.cancellation_reason ? `| Cancel Note: ${o.cancellation_reason}` : ''}</div>
+                <div className="text-xs text-slate-500 mt-1">Status: <span className="capitalize font-medium">{o.status}</span> · ৳{parseFloat(o.total_amount || 0).toFixed(0)} {o.cancellation_reason ? `| ${o.cancellation_reason}` : ''}</div>
               </button>
             ))}
           </div>
@@ -366,14 +382,19 @@ const Dashboard = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="card p-6">
-          <h3 className="text-sm font-bold text-slate-800 mb-4">Items Sold By Name</h3>
+          <h3 className="text-sm font-bold text-slate-800 mb-1">Items Sold By Name</h3>
+          <p className="text-xs text-slate-400 mb-3">Click a bar to see item details</p>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={soldByName} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+            <BarChart data={soldByName} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+              onClick={(e) => { if (e?.activePayload?.[0]) setSelectedItem(e.activePayload[0].payload); }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="name" angle={-25} textAnchor="end" height={60} tick={{ fontSize: 11, fill: '#64748b' }} />
-              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-              <Tooltip />
-              <Bar dataKey="sold" fill="#0284C7" radius={[4, 4, 0, 0]} />
+              <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} />
+              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10 }} />
+              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+              <Bar yAxisId="left" dataKey="sold" name="Qty Sold" stackId="a" fill="#0284C7" radius={[0,0,0,0]} cursor="pointer" />
+              <Bar yAxisId="left" dataKey="orders" name="Orders" stackId="a" fill="#38BDF8" radius={[4,4,0,0]} cursor="pointer" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -426,6 +447,106 @@ const Dashboard = () => {
                 <div className="text-xs text-slate-500">Amount: ৳{parseFloat(t.amount || 0).toFixed(2)} · Discount: ৳{parseFloat(t.discount_amount || 0).toFixed(2)}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {/* ── Order Detail Modal ── */}
+      {viewingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setViewingOrder(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-base font-black text-slate-800">
+                Order Detail {viewingOrderDetail?.order ? `— ${viewingOrderDetail.order.order_number}` : ''}
+              </h2>
+              <button onClick={() => setViewingOrder(null)} className="p-1.5 rounded-full hover:bg-slate-100 transition-colors">
+                <XMarkIcon className="h-5 w-5 text-slate-500" />
+              </button>
+            </div>
+            {!viewingOrderDetail ? (
+              <div className="flex items-center justify-center py-12 text-slate-400 text-sm">Loading…</div>
+            ) : (
+              <div className="px-6 py-4 space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-slate-400 text-xs">Status</span><div className="font-semibold capitalize text-slate-700">{viewingOrderDetail.order?.status}</div></div>
+                  <div><span className="text-slate-400 text-xs">Type</span><div className="font-semibold capitalize text-slate-700">{viewingOrderDetail.order?.order_type === 'direct' ? 'Takeaway' : viewingOrderDetail.order?.order_type}</div></div>
+                  <div><span className="text-slate-400 text-xs">Total</span><div className="font-bold text-sky-600">৳{parseFloat(viewingOrderDetail.order?.total_amount || 0).toFixed(2)}</div></div>
+                  <div><span className="text-slate-400 text-xs">Table</span><div className="font-semibold text-slate-700">{viewingOrderDetail.order?.table_number || '—'}</div></div>
+                  {viewingOrderDetail.order?.customer_name && (
+                    <div><span className="text-slate-400 text-xs">Customer</span><div className="font-semibold text-slate-700">{viewingOrderDetail.order.customer_name}</div></div>
+                  )}
+                  {viewingOrderDetail.order?.customer_phone && (
+                    <div><span className="text-slate-400 text-xs">Phone</span><div className="font-semibold text-slate-700">{viewingOrderDetail.order.customer_phone}</div></div>
+                  )}
+                  <div className="col-span-2"><span className="text-slate-400 text-xs">Placed at</span><div className="font-semibold text-slate-700">{viewingOrderDetail.order?.created_at ? new Date(viewingOrderDetail.order.created_at).toLocaleString() : '—'}</div></div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Items</div>
+                  <div className="space-y-1">
+                    {(viewingOrderDetail.items || []).map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm py-1.5 border-b border-slate-50">
+                        <span className="text-slate-700">{item.item_name || item.name} <span className="text-slate-400">×{item.quantity}</span></span>
+                        <span className="font-semibold text-slate-700">৳{parseFloat(item.total_price || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {(viewingOrderDetail.payments || []).length > 0 && (
+                  <div>
+                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Payments</div>
+                    {viewingOrderDetail.payments.map((p, i) => (
+                      <div key={i} className="flex justify-between text-sm py-1">
+                        <span className="capitalize text-slate-600">{p.payment_method}</span>
+                        <span className="font-semibold text-slate-700">৳{parseFloat(p.amount || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {viewingOrderDetail.order?.cancellation_reason && (
+                  <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
+                    <span className="font-semibold">Cancel Note:</span> {viewingOrderDetail.order.cancellation_reason}
+                  </div>
+                )}
+                <button onClick={() => { setViewingOrder(null); navigate('/orders'); }} className="w-full btn btn-secondary btn-sm mt-2">Open in Orders Page</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Item Detail Modal ── */}
+      {selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setSelectedItem(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-base font-black text-slate-800">{selectedItem.name}</h2>
+              <button onClick={() => setSelectedItem(null)} className="p-1.5 rounded-full hover:bg-slate-100 transition-colors">
+                <XMarkIcon className="h-5 w-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-sky-50 p-4 text-center">
+                  <div className="text-2xl font-black text-sky-600">{selectedItem.sold}</div>
+                  <div className="text-xs text-sky-500 mt-0.5">Units Sold</div>
+                </div>
+                <div className="rounded-xl bg-emerald-50 p-4 text-center">
+                  <div className="text-2xl font-black text-emerald-600">৳{(selectedItem.revenue || 0).toLocaleString()}</div>
+                  <div className="text-xs text-emerald-500 mt-0.5">Revenue</div>
+                </div>
+                <div className="rounded-xl bg-violet-50 p-4 text-center">
+                  <div className="text-2xl font-black text-violet-600">{selectedItem.orders}</div>
+                  <div className="text-xs text-violet-500 mt-0.5">Orders</div>
+                </div>
+                <div className="rounded-xl bg-amber-50 p-4 text-center">
+                  <div className="text-2xl font-black text-amber-600">{selectedItem.cancelledCount}</div>
+                  <div className="text-xs text-amber-500 mt-0.5">Cancelled</div>
+                </div>
+              </div>
+              {selectedItem.category && (
+                <div className="text-sm text-center text-slate-400">Category: <span className="font-semibold text-slate-600">{selectedItem.category}</span></div>
+              )}
+              <button onClick={() => { setSelectedItem(null); navigate('/reports'); }} className="w-full btn btn-secondary btn-sm mt-1">View Full Report</button>
+            </div>
           </div>
         </div>
       )}
