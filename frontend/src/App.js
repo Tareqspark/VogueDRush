@@ -58,6 +58,9 @@ const TaxCompliance   = lazy(() => import('./pages/TaxCompliance'));
 const Documents       = lazy(() => import('./pages/Documents'));
 const AIForecasting   = lazy(() => import('./pages/AIForecasting'));
 const CallCenter      = lazy(() => import('./pages/CallCenter'));
+const HoldOrders      = lazy(() => import('./pages/HoldOrders'));
+const CancelledOrders = lazy(() => import('./pages/CancelledOrders'));
+const CollectedAmount = lazy(() => import('./pages/CollectedAmount'));
 const QueueManagement = lazy(() => import('./pages/QueueManagement'));
 const GiftCards       = lazy(() => import('./pages/GiftCards'));
 const Membership      = lazy(() => import('./pages/Membership'));
@@ -231,6 +234,10 @@ const AppContent = () => {
                       </ProtectedRoute>
                     }
                   />
+
+                  <Route path="/hold-orders" element={<ProtectedRoute><Layout><HoldOrders /></Layout></ProtectedRoute>} />
+                  <Route path="/cancelled-orders" element={<ProtectedRoute><Layout><CancelledOrders /></Layout></ProtectedRoute>} />
+                  <Route path="/collected-amount" element={<ProtectedRoute requiredRole="admin"><Layout><CollectedAmount /></Layout></ProtectedRoute>} />
 
                   {/* Kitchen - accessible to all roles */}
                   <Route

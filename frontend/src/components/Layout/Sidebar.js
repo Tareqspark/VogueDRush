@@ -42,6 +42,8 @@ import {
   CodeBracketIcon,
   BuildingOfficeIcon,
   CalculatorIcon,
+  PauseCircleIcon,
+  XCircleIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -50,8 +52,9 @@ const NAV_SECTIONS = [
     label: 'Operations',
     items: [
       { name: 'Dashboard',    href: '/',             icon: HomeIcon,            roles: ['admin', 'waiter', 'kitchen'] },
-      { name: 'Orders',       href: '/orders',       icon: ShoppingCartIcon,    roles: ['admin', 'waiter'] },
-      { name: 'Kitchen',      href: '/kitchen',      icon: FireIcon,            roles: ['admin', 'waiter', 'kitchen'] },
+      { name: 'Orders',       href: '/orders',       icon: ShoppingCartIcon,    roles: ['admin', 'waiter'] },      { name: 'Hold Orders',   href: '/hold-orders',  icon: PauseCircleIcon,     roles: ['admin', 'waiter'] },
+      { name: 'Cancelled',     href: '/cancelled-orders', icon: XCircleIcon,     roles: ['admin', 'waiter'] },
+      { name: 'Collected',     href: '/collected-amount', icon: BanknotesIcon,   roles: ['admin'] },      { name: 'Kitchen',      href: '/kitchen',      icon: FireIcon,            roles: ['admin', 'waiter', 'kitchen'] },
       { name: 'Tables',       href: '/tables',       icon: RectangleGroupIcon,  roles: ['admin', 'waiter'] },
       { name: 'Reservations', href: '/reservations', icon: CalendarDaysIcon,    roles: ['admin', 'waiter'] },
       { name: 'Delivery',     href: '/delivery',     icon: TruckIcon,           roles: ['admin', 'waiter'] },

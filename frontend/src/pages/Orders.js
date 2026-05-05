@@ -5,6 +5,7 @@ import {
   PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
   PencilSquareIcon, PrinterIcon, LockClosedIcon, ArrowLeftIcon,
+  PauseCircleIcon, ClockIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -15,6 +16,7 @@ const STATUS_COLORS = {
   ready:     'bg-emerald-50 text-emerald-700 border-emerald-200',
   done:      'bg-slate-100 text-slate-500 border-slate-200',
   cancelled: 'bg-rose-50 text-rose-600 border-rose-200',
+  hold:      'bg-orange-50 text-orange-600 border-orange-200',
 };
 
 const TYPE_LABELS = { dine_in: 'Dine In', delivery: 'Delivery', direct: 'Takeway' };
@@ -32,6 +34,7 @@ export default function Orders() {
   const [filterType, setFilterType] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [holdingOrder, setHoldingOrder] = useState(null);
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
@@ -89,7 +92,7 @@ export default function Orders() {
       <div className="flex flex-wrap gap-2">
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="select w-36">
           <option value="">All Status</option>
-          {['pending','preparing','ready','done','cancelled'].map(s => (
+          {['pending','preparing','ready','done','cancelled','hold'].map(s => (
             <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
           ))}
         </select>
@@ -114,36 +117,39 @@ export default function Orders() {
           {orders.map(order => (
             <div key={order.id}
               onClick={() => setSelectedOrder(order.id)}
-              className={`card p-4 cursor-pointer hover:shadow-card-hover transition-all group border-l-4 ${TYPE_CARD_STYLES[order.order_type] || 'border-l-slate-200'}`}>
+              className={`card p-4 cursor-pointer hover:shadow-card-hover transition-all group border-l-4 ${order.status === 'hold' ? 'border-l-orange-400 bg-orange-50/20' : (TYPE_CARD_STYLES[order.order_type] || 'border-l-slate-200')}`}>
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
                   <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
                     {TYPE_LABELS[order.order_type]}
                   </span>
                   {order.table_number && (
-                    <span className="text-sm text-slate-500 font-medium">Table {order.table_number}</span>
-                  )}
-                  {order.customer_name && (
-                    <span className="text-sm text-slate-500">{order.customer_name}</span>
-                  )}
-                  {order.bill_printed ? (
-                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
-                      <LockClosedIcon className="h-3 w-3" /> Bill Printed
+                    <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
+                      Table {order.table_number}
                     </span>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status]}`}>
-                    {order.status}
-                  </span>
-                  <span className="font-black text-slate-800">৳{parseFloat(order.total_amount).toFixed(0)}</span>
-                  <span className="text-xs text-slate-400">
+                  )}
+                  <span className="flex items-center gap-1 text-xs text-slate-400">
+                    <ClockIcon className="h-3 w-3" />
                     {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
+                <div className="flex items-center gap-2.5">
+                  <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+                    {order.status === 'hold' ? '⏸ Hold' : order.status}
+                  </span>
+                  <span className="font-black text-slate-800 text-base">৳{parseFloat(order.total_amount).toFixed(0)}</span>
+                  {order.bill_printed && (
+                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
+                      <LockClosedIcon className="h-3 w-3" /> Printed
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="text-xs text-slate-400 mt-1.5 font-medium">by {order.waiter_full_name}</div>
+              <div className="text-xs text-slate-400 mt-1.5 flex items-center gap-3">
+                <span>by {order.waiter_full_name}</span>
+                {order.customer_name && <span className="font-medium text-slate-500">{order.customer_name}{order.customer_phone ? ` · ${order.customer_phone}` : ''}</span>}
+              </div>
             </div>
           ))}
         </div>
@@ -157,6 +163,7 @@ export default function Orders() {
           onUpdateStatus={updateStatus}
           onPrintBill={printBill}
           onEditOrder={(id) => { setEditingOrder(id); setSelectedOrder(null); }}
+          onHoldOrder={(order) => { setHoldingOrder(order); setSelectedOrder(null); }}
           userRole={user.role}
           userId={user.id}
         />
@@ -169,6 +176,18 @@ export default function Orders() {
           onClose={() => setEditingOrder(null)}
           onSaved={() => {
             setEditingOrder(null);
+            queryClient.invalidateQueries('orders');
+          }}
+        />
+      )}
+
+      {holdingOrder && (
+        <HoldOrderModal
+          api={api}
+          order={holdingOrder}
+          onClose={() => setHoldingOrder(null)}
+          onHeld={() => {
+            setHoldingOrder(null);
             queryClient.invalidateQueries('orders');
           }}
         />
@@ -193,7 +212,7 @@ export default function Orders() {
 // ────────────────────────────────────────────────────────────────
 // Order Detail Modal
 // ────────────────────────────────────────────────────────────────
-function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, userRole, userId }) {
+function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, onHoldOrder, userRole, userId }) {
   const { order, items } = detail;
   const [printing, setPrinting] = useState(false);
   const [showBillPopup, setShowBillPopup] = useState(false);
@@ -202,11 +221,22 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
   const [paymentLast4, setPaymentLast4] = useState('');
 
   const activeItems = items.filter(i => i.status !== 'cancelled');
-  const canEdit = !order.bill_printed && !['done', 'cancelled'].includes(order.status)
+  const canEdit = !order.bill_printed && !['done', 'cancelled', 'hold'].includes(order.status)
+    && (userRole === 'admin' || order.waiter_id === userId);
+  const canHold = !order.bill_printed && !['done', 'cancelled', 'hold'].includes(order.status)
     && (userRole === 'admin' || order.waiter_id === userId);
 
   const nextStatus = { pending: 'preparing', preparing: 'ready', ready: 'done' }[order.status];
-  const nextLabel = { pending: 'Preparing', preparing: 'Ready', ready: 'Done' }[order.status];
+  const nextLabel  = { pending: 'Preparing', preparing: 'Ready', ready: 'Done' }[order.status];
+
+  // Build one-sentence order summary
+  const summaryParts = [];
+  if (order.table_number) summaryParts.push(`Table ${order.table_number}`);
+  if (order.customer_name) summaryParts.push(order.customer_name);
+  if (order.customer_phone) summaryParts.push(order.customer_phone);
+  summaryParts.push(`${activeItems.length} item${activeItems.length !== 1 ? 's' : ''}`);
+  summaryParts.push(`\u09f3${parseFloat(order.total_amount).toFixed(0)}`);
+  const orderSummary = summaryParts.join(' \u00b7 ');
 
   const handlePrint = async () => {
     if (['card', 'bkash', 'nagad'].includes(paymentMethod) && !/^\d{4}$/.test(paymentLast4)) {
@@ -267,11 +297,16 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
             <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
           </div>
 
+          {/* One-sentence order summary */}
+          <div className="bg-sky-50 border border-sky-100 rounded-xl px-4 py-2.5 text-sm font-semibold text-sky-800">
+            {orderSummary}
+          </div>
+
           <div className="flex flex-wrap gap-2">
-            <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+            <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+              {order.status === 'hold' ? '⏸ Hold' : order.status}
+            </span>
             <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">{TYPE_LABELS[order.order_type]}</span>
-            {order.table_number && <span className="text-xs px-2.5 py-1 rounded-full bg-slate-50 text-slate-600 border font-semibold">Table {order.table_number}</span>}
-            {order.customer_name && <span className="text-xs text-slate-500">{order.customer_name} {order.customer_phone}</span>}
             {order.bill_printed && (
               <span className="flex items-center gap-1 text-xs bg-slate-100 text-slate-500 border border-slate-200 px-2.5 py-1 rounded-full font-semibold">
                 <LockClosedIcon className="h-3 w-3" /> Locked
@@ -307,6 +342,13 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
               <button onClick={() => onEditOrder(order.id)}
                 className="btn btn-secondary flex items-center gap-1.5">
                 <PencilSquareIcon className="h-4 w-4" /> Edit Items
+              </button>
+            )}
+
+            {canHold && (
+              <button onClick={() => onHoldOrder(order)}
+                className="btn btn-secondary flex items-center gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50">
+                <PauseCircleIcon className="h-4 w-4" /> Hold Order
               </button>
             )}
 
@@ -391,7 +433,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
 // Build receipt HTML for window.print()
 // ────────────────────────────────────────────────────────────────
 function buildReceiptHTML(data) {
-  const { order, items, restaurant = {} } = data;
+  const { order, items, restaurant = {}, isDue = false } = data;
   const currency = restaurant.currency || '৳';
   const rname = restaurant.name || 'FoodPark';
   const address = restaurant.address || '';
@@ -423,6 +465,7 @@ function buildReceiptHTML(data) {
   <tr class="total"><td>TOTAL</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
   <div class="divider"></div>
   <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>
+  ${isDue ? '<div style="margin-top:12px;padding:8px;border:2px dashed #dc2626;text-align:center;"><strong style="font-size:14px;color:#dc2626;">⚠ DUE — PAYMENT PENDING</strong><br/><span style="font-size:11px;color:#555;">Customer: ' + (order.customer_name || '') + '</span><br/><span style="font-size:11px;color:#555;">Phone: ' + (order.customer_phone || '') + '</span></div>' : ''}
   </body></html>`;
 }
 
@@ -434,7 +477,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [toRemove, setToRemove] = useState([]);
+  const [itemQties, setItemQties] = useState({}); // {order_item_id: new_quantity}
   const [toAdd, setToAdd] = useState([]);
 
   const { data: orderDetail, isLoading: loadingOrder } = useQuery(
@@ -457,8 +500,9 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   const categories = categoriesData || [];
   const menuItems = itemsData?.items || [];
 
-  const toggleRemove = (id) =>
-    setToRemove(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const getQty = (item) => itemQties[item.id] !== undefined ? itemQties[item.id] : item.quantity;
+  const setQty = (item, val) => setItemQties(prev => ({ ...prev, [item.id]: Math.max(0, val) }));
+  const changeItemQty = (item, delta) => setQty(item, getQty(item) + delta);
 
   const addToCart = (item) => setToAdd(prev => {
     const ex = prev.find(c => c.food_item_id === item.id);
@@ -472,12 +516,21 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   const removeFromAdd = (id) => setToAdd(prev => prev.filter(c => c.food_item_id !== id));
 
   const save = async () => {
-    if (toRemove.length === 0 && toAdd.length === 0) return toast.error('No changes made');
+    const update_items = currentActiveItems
+      .filter(i => itemQties[i.id] !== undefined && itemQties[i.id] > 0 && itemQties[i.id] !== i.quantity)
+      .map(i => ({ order_item_id: i.id, quantity: itemQties[i.id] }));
+    const remove_item_ids = currentActiveItems
+      .filter(i => itemQties[i.id] === 0)
+      .map(i => i.id);
+    if (update_items.length === 0 && remove_item_ids.length === 0 && toAdd.length === 0) {
+      return toast.error('No changes made');
+    }
     setSaving(true);
     try {
       await api.put(`/orders/${orderId}/items`, {
         add_items: toAdd.map(({ food_item_id, quantity }) => ({ food_item_id, quantity })),
-        remove_item_ids: toRemove,
+        remove_item_ids,
+        update_items,
       });
       toast.success('Order updated successfully');
       queryClient.invalidateQueries(['order-detail', orderId]);
@@ -489,7 +542,11 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
     }
   };
 
-  const remaining = currentActiveItems.filter(i => !toRemove.includes(i.id)).reduce((s, i) => s + parseFloat(i.total_price), 0);
+  const remaining = currentActiveItems.filter(i => itemQties[i.id] !== 0).reduce((s, i) => {
+    const qty = itemQties[i.id] !== undefined ? itemQties[i.id] : i.quantity;
+    const unitPrice = parseFloat(i.total_price) / i.quantity;
+    return s + unitPrice * qty;
+  }, 0);
   const addSub = toAdd.reduce((s, i) => s + i.price * i.quantity, 0);
   const previewSub = remaining + addSub;
   const svcRate = order?.order_type === 'dine_in' ? 0.10 : 0;
@@ -513,26 +570,38 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
             {/* Current items */}
             <div className="p-4 border-b border-slate-100">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Current Items</p>
-              <p className="text-xs text-slate-400 mb-3">Click to mark for removal</p>
+              <p className="text-xs text-slate-400 mb-3">Change qty or remove items before food is ready</p>
               <div className="space-y-2">
-                {currentActiveItems.map(item => (
-                  <div key={item.id} onClick={() => toggleRemove(item.id)}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                      toRemove.includes(item.id)
-                        ? 'bg-rose-50 border-rose-300 opacity-60'
-                        : 'bg-white border-slate-100 hover:border-rose-200 hover:bg-rose-50/40'
-                    }`}>
-                    <span className={`text-sm font-medium text-slate-700 ${toRemove.includes(item.id) ? 'line-through' : ''}`}>
-                      {item.item_name} × {item.quantity}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-800">৳{parseFloat(item.total_price).toFixed(0)}</span>
-                      {toRemove.includes(item.id)
-                        ? <span className="text-xs text-rose-500 font-bold">REMOVE</span>
-                        : <TrashIcon className="h-4 w-4 text-slate-300" />}
+                {currentActiveItems.map(item => {
+                  const qty = getQty(item);
+                  const isRemoving = qty === 0;
+                  return (
+                    <div key={item.id}
+                      className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isRemoving ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-100'}`}>
+                      <div className="flex-1 min-w-0">
+                        <span className={`text-sm font-medium ${isRemoving ? 'line-through text-rose-400' : 'text-slate-700'}`}>
+                          {item.item_name}
+                        </span>
+                        <div className="text-xs text-slate-400">৳{parseFloat(item.unit_price).toFixed(0)} × {qty} = ৳{(parseFloat(item.unit_price) * qty).toFixed(0)}</div>
+                      </div>
+                      <div className="flex items-center gap-1 ml-2">
+                        <button onClick={() => changeItemQty(item, -1)}
+                          className="h-7 w-7 rounded-lg bg-slate-100 flex items-center justify-center hover:bg-rose-100 transition-colors">
+                          <MinusIcon className="h-3.5 w-3.5 text-slate-600" />
+                        </button>
+                        <span className={`w-7 text-center text-sm font-black ${isRemoving ? 'text-rose-500' : 'text-slate-800'}`}>{qty}</span>
+                        <button onClick={() => changeItemQty(item, 1)}
+                          className="h-7 w-7 rounded-lg bg-slate-100 flex items-center justify-center hover:bg-emerald-100 transition-colors">
+                          <PlusIcon className="h-3.5 w-3.5 text-slate-600" />
+                        </button>
+                        <button onClick={() => setQty(item, 0)}
+                          className="h-7 w-7 rounded-lg flex items-center justify-center text-rose-400 hover:bg-rose-50 ml-1">
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
             {/* Add items */}
@@ -572,63 +641,174 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
             <h2 className="font-black text-slate-800">Changes</h2>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {toRemove.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-rose-500 uppercase tracking-wider mb-2">Removing</p>
-                <div className="space-y-2">
-                  {currentActiveItems.filter(i => toRemove.includes(i.id)).map(item => (
-                    <div key={item.id} className="flex justify-between items-center bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-sm">
-                      <span className="text-rose-700 font-medium">{item.item_name} × {item.quantity}</span>
-                      <button onClick={() => toggleRemove(item.id)} className="text-rose-400 hover:text-rose-600">
-                        <XMarkIcon className="h-4 w-4" />
-                      </button>
+            {(() => {
+              const removing = currentActiveItems.filter(i => itemQties[i.id] === 0);
+              const updating = currentActiveItems.filter(i => itemQties[i.id] !== undefined && itemQties[i.id] > 0 && itemQties[i.id] !== i.quantity);
+              const hasChanges = removing.length > 0 || updating.length > 0 || toAdd.length > 0;
+              return (<>
+                {removing.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-rose-500 uppercase tracking-wider mb-2">Removing</p>
+                    <div className="space-y-2">
+                      {removing.map(item => (
+                        <div key={item.id} className="flex justify-between items-center bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-sm">
+                          <span className="text-rose-700 font-medium line-through">{item.item_name}</span>
+                          <button onClick={() => setQty(item, item.quantity)} className="text-rose-400 hover:text-rose-600">
+                            <XMarkIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {toAdd.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-2">Adding</p>
-                <div className="space-y-2">
-                  {toAdd.map(item => (
-                    <div key={item.food_item_id} className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
-                      <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-sm font-bold text-emerald-800 truncate">{item.name}</span>
-                        <button onClick={() => removeFromAdd(item.food_item_id)} className="text-emerald-400 hover:text-emerald-600">
-                          <XMarkIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => changeAddQty(item.food_item_id, -1)} className="h-6 w-6 rounded-lg bg-white border border-emerald-200 flex items-center justify-center">
-                          <MinusIcon className="h-3 w-3 text-slate-600" />
-                        </button>
-                        <span className="w-6 text-center text-sm font-black">{item.quantity}</span>
-                        <button onClick={() => changeAddQty(item.food_item_id, 1)} className="h-6 w-6 rounded-lg bg-emerald-100 flex items-center justify-center">
-                          <PlusIcon className="h-3 w-3 text-emerald-700" />
-                        </button>
-                        <span className="text-xs text-slate-500 ml-auto">৳{(item.price * item.quantity).toFixed(0)}</span>
-                      </div>
+                  </div>
+                )}
+                {updating.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">Qty Changed</p>
+                    <div className="space-y-2">
+                      {updating.map(item => (
+                        <div key={item.id} className="flex justify-between items-center bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm">
+                          <span className="text-amber-800 font-medium">{item.item_name}</span>
+                          <span className="text-amber-700 font-bold">{item.quantity} → {itemQties[item.id]}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {toRemove.length === 0 && toAdd.length === 0 && (
-              <div className="text-center mt-8">
-                <PencilSquareIcon className="h-10 w-10 text-slate-200 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">Select items to remove or add from the menu</p>
-              </div>
-            )}
+                  </div>
+                )}
+                {toAdd.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-2">Adding</p>
+                    <div className="space-y-2">
+                      {toAdd.map(item => (
+                        <div key={item.food_item_id} className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                          <div className="flex justify-between items-center mb-1.5">
+                            <span className="text-sm font-bold text-emerald-800 truncate">{item.name}</span>
+                            <button onClick={() => removeFromAdd(item.food_item_id)} className="text-emerald-400 hover:text-emerald-600">
+                              <XMarkIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => changeAddQty(item.food_item_id, -1)} className="h-6 w-6 rounded-lg bg-white border border-emerald-200 flex items-center justify-center">
+                              <MinusIcon className="h-3 w-3 text-slate-600" />
+                            </button>
+                            <span className="w-6 text-center text-sm font-black">{item.quantity}</span>
+                            <button onClick={() => changeAddQty(item.food_item_id, 1)} className="h-6 w-6 rounded-lg bg-emerald-100 flex items-center justify-center">
+                              <PlusIcon className="h-3 w-3 text-emerald-700" />
+                            </button>
+                            <span className="text-xs text-slate-500 ml-auto">৳{(item.price * item.quantity).toFixed(0)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!hasChanges && (
+                  <div className="text-center mt-8">
+                    <PencilSquareIcon className="h-10 w-10 text-slate-200 mx-auto mb-2" />
+                    <p className="text-slate-400 text-sm">Use +/- to change qty, trash to remove, or add new items from the menu</p>
+                  </div>
+                )}
+              </>);
+            })()}
           </div>
           <div className="p-4 border-t border-slate-200 space-y-3 bg-white">
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
               <div className="flex justify-between text-slate-500 text-xs"><span>New Subtotal</span><span>৳{previewSub.toFixed(2)}</span></div>
               <div className="flex justify-between font-black text-slate-800 border-t border-slate-200 pt-2"><span>Est. Total</span><span>৳{previewTotal.toFixed(2)}</span></div>
             </div>
-            <button onClick={save} disabled={saving || (toRemove.length === 0 && toAdd.length === 0)}
+            <button onClick={save} disabled={saving || (Object.keys(itemQties).length === 0 && toAdd.length === 0)}
               className="btn btn-primary w-full disabled:opacity-50 justify-center">
               {saving ? <LoadingSpinner size="sm" /> : <><CheckIcon className="h-4 w-4" />Save Changes</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Hold Order Modal
+// ────────────────────────────────────────────────────────────────
+function HoldOrderModal({ api, order, onClose, onHeld }) {
+  const [customerName, setCustomerName] = useState(order.customer_name || '');
+  const [customerPhone, setCustomerPhone] = useState(order.customer_phone || '');
+  const [saving, setSaving] = useState(false);
+  const [printDue, setPrintDue] = useState(true);
+
+  const holdAmount = parseFloat(order.total_amount).toFixed(2);
+
+  const handleHold = async () => {
+    if (!customerName.trim()) return toast.error('Customer name is required');
+    if (!customerPhone.trim()) return toast.error('Customer phone is required');
+    setSaving(true);
+    try {
+      const res = await api.patch(`/orders/${order.id}/hold`, {
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone.trim(),
+      });
+      toast.success('Order held. Table released.');
+      if (printDue) {
+        // Print DUE slip
+        const heldOrder = res.data.order || { ...order, customer_name: customerName, customer_phone: customerPhone };
+        const html = buildReceiptHTML({
+          order: heldOrder,
+          items: [],  // no item lines on DUE slip — caller should pass items if needed
+          isDue: true,
+        });
+        const w = window.open('', '_blank', 'width=380,height=500');
+        if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+      }
+      onHeld();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to hold order');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-sm rounded-2xl border border-orange-100 animate-fade-in"
+        style={{ boxShadow: '0 20px 60px rgb(234 88 12 / 0.15)' }}>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-slate-800">Hold Order</h2>
+              <p className="text-xs text-slate-400">Customer will pay later · Table will be released</p>
+            </div>
+            <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+          </div>
+
+          {/* Amount preview */}
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-center">
+            <p className="text-xs text-orange-600 font-bold uppercase tracking-wider mb-1">Due Amount</p>
+            <p className="text-3xl font-black text-orange-700">৳{holdAmount}</p>
+            <p className="text-xs text-orange-500 mt-1">{order.order_number}</p>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="label">Customer Name <span className="text-rose-500">*</span></label>
+              <input className="input" placeholder="Enter customer name" value={customerName}
+                onChange={e => setCustomerName(e.target.value)} autoFocus />
+            </div>
+            <div>
+              <label className="label">Phone Number <span className="text-rose-500">*</span></label>
+              <input className="input" placeholder="01XXXXXXXXX" value={customerPhone}
+                onChange={e => setCustomerPhone(e.target.value)} />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={printDue} onChange={e => setPrintDue(e.target.checked)}
+                className="h-4 w-4 rounded" />
+              <span className="text-sm text-slate-600">Print DUE slip</span>
+            </label>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button className="btn btn-secondary flex-1" onClick={onClose} disabled={saving}>Cancel</button>
+            <button className="btn flex-1 bg-orange-500 text-white hover:bg-orange-600 justify-center"
+              onClick={handleHold} disabled={saving}>
+              {saving ? <LoadingSpinner size="sm" /> : <><PauseCircleIcon className="h-4 w-4" />Confirm Hold</>}
             </button>
           </div>
         </div>

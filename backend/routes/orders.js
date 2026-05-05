@@ -282,6 +282,98 @@ router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
   }
 });
 
+// Get all hold orders (pay-later)
+router.get('/hold', async (req, res) => {
+  try {
+    const { page = 1, limit = 100 } = req.query;
+    const limitInt = Math.min(parseInt(limit) || 100, 200);
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    const rows = await query(
+      `SELECT o.*, u.full_name AS waiter_full_name, t.table_number, t.location AS table_location
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.waiter_id
+       LEFT JOIN tables t ON t.id = o.table_id
+       WHERE o.status = 'hold'
+       ORDER BY o.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [limitInt, offsetInt]
+    );
+    const countResult = await query("SELECT COUNT(*) AS total FROM orders WHERE status = 'hold'");
+    res.json({ orders: rows, total: countResult[0].total, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Get hold orders error:', error);
+    res.status(500).json({ error: 'Failed to fetch hold orders' });
+  }
+});
+
+// Get all cancelled orders
+router.get('/cancelled', requireRole(['admin', 'waiter']), async (req, res) => {
+  try {
+    const { page = 1, limit = 100, start_date, end_date } = req.query;
+    const limitInt = Math.min(parseInt(limit) || 100, 200);
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+    let whereClause = "o.status = 'cancelled'";
+    const values = [];
+    if (start_date) { whereClause += ' AND DATE(o.created_at) >= ?'; values.push(start_date); }
+    if (end_date)   { whereClause += ' AND DATE(o.created_at) <= ?'; values.push(end_date); }
+    const rows = await query(
+      `SELECT o.*, u.full_name AS waiter_full_name, t.table_number,
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.reason'))
+               FROM audit_logs a WHERE a.table_name = 'orders' AND a.record_id = o.id
+               AND a.action = 'update_status'
+               AND JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.status')) = 'cancelled'
+               ORDER BY a.created_at DESC LIMIT 1) AS cancellation_reason
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.waiter_id
+       LEFT JOIN tables t ON t.id = o.table_id
+       WHERE ${whereClause}
+       ORDER BY o.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...values, limitInt, offsetInt]
+    );
+    const countResult = await query(`SELECT COUNT(*) AS total FROM orders o WHERE ${whereClause}`, values);
+    res.json({ orders: rows, total: countResult[0].total, page: parseInt(page), limit: limitInt });
+  } catch (error) {
+    console.error('Get cancelled orders error:', error);
+    res.status(500).json({ error: 'Failed to fetch cancelled orders' });
+  }
+});
+
+// Get collected amount — payment breakdown by method (cash / card / bKash / Nagad)
+router.get('/collected-amount', requireRole(['admin']), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let dateFilter = '';
+    const values = [];
+    if (start_date) { dateFilter += ' AND DATE(p.created_at) >= ?'; values.push(start_date); }
+    if (end_date)   { dateFilter += ' AND DATE(p.created_at) <= ?'; values.push(end_date); }
+    const summary = await query(
+      `SELECT p.payment_method, COUNT(*) AS count, SUM(p.amount) AS total_amount
+       FROM payments p WHERE p.status = 'completed'${dateFilter}
+       GROUP BY p.payment_method ORDER BY total_amount DESC`,
+      values
+    );
+    const transactions = await query(
+      `SELECT p.id, p.payment_method, p.amount, p.transaction_id, p.created_at,
+              o.order_number, o.order_type, o.customer_name, o.customer_phone,
+              o.total_amount AS order_total, o.discount_amount,
+              u.full_name AS waiter_name, t.table_number
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       LEFT JOIN users u ON u.id = o.waiter_id
+       LEFT JOIN tables t ON t.id = o.table_id
+       WHERE p.status = 'completed'${dateFilter}
+       ORDER BY p.created_at DESC LIMIT 300`,
+      values
+    );
+    const grandTotal = summary.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0);
+    res.json({ summary, transactions, grandTotal });
+  } catch (error) {
+    console.error('Get collected amount error:', error);
+    res.status(500).json({ error: 'Failed to fetch collected amount' });
+  }
+});
+
 // ── Parameterised route — must stay after all static GET sub-paths ──
 
 // Get order by ID with items
@@ -571,8 +663,58 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
   }
 });
 
-// C-7: Edit order items — add/remove items from an active, unlocked order
-// Frontend calls: PUT /api/orders/:id/items  { add_items: [{food_item_id, quantity}], remove_item_ids: [id,...] }
+// Put order on hold — customer pays later; table is auto-released
+router.patch('/:id/hold', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customer_name, customer_phone } = req.body;
+    if (!customer_name || !String(customer_name).trim()) {
+      return res.status(400).json({ error: 'Customer name is required to hold an order' });
+    }
+    if (!customer_phone || !String(customer_phone).trim()) {
+      return res.status(400).json({ error: 'Customer phone is required to hold an order' });
+    }
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (['done', 'cancelled', 'hold'].includes(order.status)) {
+      return res.status(400).json({ error: `Order cannot be held — current status: ${order.status}` });
+    }
+    if (req.user.role !== 'admin' && order.waiter_id !== req.user.id) {
+      return res.status(403).json({ error: 'Only the assigned waiter or admin can hold this order' });
+    }
+    await transaction(async (connection) => {
+      await connection.query(
+        'UPDATE orders SET status = ?, customer_name = ?, customer_phone = ?, updated_at = NOW() WHERE id = ?',
+        ['hold', customer_name.trim(), customer_phone.trim(), id]
+      );
+      if (order.order_type === 'dine_in' && order.table_id) {
+        await connection.query(
+          'UPDATE tables SET status = ?, updated_at = NOW() WHERE id = ?',
+          ['available', order.table_id]
+        );
+      }
+    });
+    await logManualAudit(
+      req.user.id, 'hold_order', 'orders', parseInt(id),
+      { status: order.status },
+      { status: 'hold', customer_name, customer_phone },
+      req.ip, req.headers['user-agent']
+    );
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('order-status-update', { orderId: parseInt(id), oldStatus: order.status, newStatus: 'hold' });
+      if (order.table_id) io.to('waiter').emit('table-available', { table_id: order.table_id });
+    }
+    const updatedOrder = await findOne('orders', { id });
+    res.json({ message: 'Order put on hold. Table released.', order: updatedOrder });
+  } catch (error) {
+    console.error('Hold order error:', error);
+    res.status(500).json({ error: error.message || 'Failed to hold order' });
+  }
+});
+
+// C-7: Edit order items — add/remove/update-qty items from an active, unlocked order
+// Frontend calls: PUT /api/orders/:id/items  { add_items, remove_item_ids, update_items: [{order_item_id, quantity}] }
 router.put('/:id/items', validateId, async (req, res) => {
   try {
     const { id } = req.params;
@@ -745,7 +887,7 @@ router.patch('/:id/status', validateId, async (req, res) => {
     const { id } = req.params;
     const { status, reason } = req.body;
     
-    const validStatuses = ['pending', 'preparing', 'ready', 'done', 'cancelled'];
+    const validStatuses = ['pending', 'preparing', 'ready', 'done', 'cancelled', 'hold'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
@@ -772,7 +914,8 @@ router.patch('/:id/status', validateId, async (req, res) => {
       preparing: ['ready', 'cancelled'],
       ready:     ['done', 'cancelled'],
       done:      [],
-      cancelled: []
+      cancelled: [],
+      hold:      ['pending', 'cancelled'],  // reactivate or cancel a hold order
     };
     if (req.user.role !== 'admin') {
       const allowed = ALLOWED_TRANSITIONS[order.status] || [];
@@ -961,7 +1104,7 @@ router.post('/:id/payments', validateId, async (req, res) => {
 router.put('/:id/items', validateId, async (req, res) => {
   try {
     const { id } = req.params;
-    const { add_items = [], remove_item_ids = [] } = req.body;
+    const { add_items = [], remove_item_ids = [], update_items = [] } = req.body;
 
     // Load order
     const order = await findOne('orders', { id });
@@ -983,6 +1126,31 @@ router.put('/:id/items', validateId, async (req, res) => {
     }
 
     await transaction(async (conn) => {
+      // Update quantity of existing items
+      for (const ui of update_items) {
+        const newQty = parseInt(ui.quantity);
+        if (!newQty || newQty < 1) continue;
+        const [rows] = await conn.query(
+          "SELECT * FROM order_items WHERE id = ? AND order_id = ? AND status != 'cancelled'",
+          [ui.order_item_id, id]
+        );
+        const oi = rows[0];
+        if (!oi) continue;
+        const qtyDiff = newQty - oi.quantity;
+        const newTotal = oi.unit_price * newQty;
+        await conn.query(
+          'UPDATE order_items SET quantity = ?, total_price = ?, updated_at = NOW() WHERE id = ?',
+          [newQty, newTotal, ui.order_item_id]
+        );
+        // Adjust inventory
+        if (qtyDiff !== 0) {
+          await conn.query(
+            'UPDATE food_inventory SET current_stock = current_stock - ?, last_updated = NOW() WHERE food_item_id = ?',
+            [qtyDiff, oi.food_item_id]
+          );
+        }
+      }
+
       // Remove items
       for (const itemId of remove_item_ids) {
         const [rows] = await conn.query('SELECT * FROM order_items WHERE id = ? AND order_id = ?', [itemId, id]);
@@ -1055,7 +1223,7 @@ router.put('/:id/items', validateId, async (req, res) => {
     await logManualAudit(
       req.user.id, 'modify_items', 'orders', parseInt(id),
       null,
-      { add_items, remove_item_ids },
+      { add_items, remove_item_ids, update_items },
       req.ip, req.headers['user-agent']
     );
 
