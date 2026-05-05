@@ -21,7 +21,8 @@ router.get('/', async (req, res) => {
     
     const limitInt = parseInt(limit) || 50;
     const offsetInt = (parseInt(page) - 1) * limitInt;
-    let whereClause = '1=1';
+    // Never show items belonging to held orders in the kitchen
+    let whereClause = "o.status != 'hold'";
     let values = [];
     
     if (status) {

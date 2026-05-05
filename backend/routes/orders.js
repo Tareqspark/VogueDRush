@@ -693,6 +693,11 @@ router.patch('/:id/hold', validateId, async (req, res) => {
           ['available', order.table_id]
         );
       }
+      // Auto-mark all pending kitchen items as ready so kitchen is cleared
+      await connection.query(
+        "UPDATE kitchen_queue SET status = 'ready', completed_at = NOW() WHERE order_id = ? AND status IN ('queued', 'preparing')",
+        [id]
+      );
     });
     await logManualAudit(
       req.user.id, 'hold_order', 'orders', parseInt(id),
@@ -703,10 +708,11 @@ router.patch('/:id/hold', validateId, async (req, res) => {
     const io = req.app.get('io');
     if (io) {
       io.emit('order-status-update', { orderId: parseInt(id), oldStatus: order.status, newStatus: 'hold' });
+      io.emit('kitchen-update', { orderId: parseInt(id), action: 'hold_cleared' });
       if (order.table_id) io.to('waiter').emit('table-available', { table_id: order.table_id });
     }
     const updatedOrder = await findOne('orders', { id });
-    res.json({ message: 'Order put on hold. Table released.', order: updatedOrder });
+    res.json({ message: 'Order put on hold. Table released. Kitchen items marked ready.', order: updatedOrder });
   } catch (error) {
     console.error('Hold order error:', error);
     res.status(500).json({ error: error.message || 'Failed to hold order' });
