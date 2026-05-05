@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
-import { ClockIcon, FireIcon, CheckIcon, BoltIcon } from '@heroicons/react/24/outline';
+import { ClockIcon, FireIcon, CheckIcon, BoltIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -30,6 +30,8 @@ export default function Kitchen() {
   const { socket } = useSocket();
   const queryClient = useQueryClient();
   const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchRef = useRef(null);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -106,6 +108,12 @@ export default function Kitchen() {
     });
   }
 
+  // Filter by order number search
+  if (searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    orders = orders.filter(o => o.order_number?.toLowerCase().includes(q));
+  }
+
   const countByStatus = (s) => Array.from(ordersMap.values()).filter(o => orderStatus(o.items) === s).length;
 
   const getElapsed = (item) => {
@@ -127,6 +135,23 @@ export default function Kitchen() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Search box */}
+          <div className="relative">
+            <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search order no..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-300 bg-white w-44"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <XMarkIcon className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="select w-36">
             <option value="">All Status</option>
             <option value="queued">Queued</option>
@@ -157,8 +182,17 @@ export default function Kitchen() {
       ) : orders.length === 0 ? (
         <div className="card p-16 text-center">
           <FireIcon className="h-12 w-12 text-slate-200 mx-auto mb-3" />
-          <p className="text-slate-400 font-medium">Kitchen queue is empty</p>
-          <p className="text-slate-300 text-sm mt-1">New orders will appear here</p>
+          {searchQuery.trim() ? (
+            <>
+              <p className="text-slate-400 font-medium">No orders match "{searchQuery}"</p>
+              <button onClick={() => setSearchQuery('')} className="text-sky-500 text-sm mt-2 hover:underline">Clear search</button>
+            </>
+          ) : (
+            <>
+              <p className="text-slate-400 font-medium">Kitchen queue is empty</p>
+              <p className="text-slate-300 text-sm mt-1">New orders will appear here</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
