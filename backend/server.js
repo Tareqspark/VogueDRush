@@ -18,6 +18,26 @@ const kitchenRoutes = require('./routes/kitchen');
 const deliveryRoutes = require('./routes/delivery');
 const reportRoutes = require('./routes/reports');
 const settingsRoutes = require('./routes/settings');
+const productionRoutes = require('./routes/production');
+const foodCostingRoutes = require('./routes/foodcosting');
+const procurementRoutes = require('./routes/procurement');
+const assetsRoutes = require('./routes/assets');
+const maintenanceRoutes = require('./routes/maintenance');
+const cateringRoutes = require('./routes/catering');
+const banquetRoutes = require('./routes/banquet');
+const marketingRoutes = require('./routes/marketing');
+const reviewsRoutes = require('./routes/reviews');
+const aggregatorRoutes = require('./routes/aggregator');
+const taxRoutes = require('./routes/tax');
+const documentsRoutes = require('./routes/documents');
+const forecastingRoutes = require('./routes/forecasting');
+const callCenterRoutes = require('./routes/callcenter');
+const queueRoutes = require('./routes/queue');
+const giftCardsRoutes = require('./routes/giftcards');
+const membershipRoutes = require('./routes/membership');
+const complaintsRoutes = require('./routes/complaints');
+const messagingRoutes = require('./routes/messaging');
+const publicApiRoutes = require('./routes/publicapi');
 
 const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
@@ -371,6 +391,28 @@ app.use('/api/kitchen', authenticateToken, kitchenRoutes);
 app.use('/api/delivery', authenticateToken, deliveryRoutes);
 app.use('/api/reports', authenticateToken, rateLimiters.reports, reportRoutes);
 app.use('/api/settings', authenticateToken, settingsRoutes);
+
+// ── ERP Phase 2 – 20 new modules ─────────────────────────
+app.use('/api/production', authenticateToken, productionRoutes);
+app.use('/api/food-costing', authenticateToken, foodCostingRoutes);
+app.use('/api/procurement', authenticateToken, procurementRoutes);
+app.use('/api/assets', authenticateToken, assetsRoutes);
+app.use('/api/maintenance', authenticateToken, maintenanceRoutes);
+app.use('/api/catering', authenticateToken, cateringRoutes);
+app.use('/api/banquet', authenticateToken, banquetRoutes);
+app.use('/api/marketing', authenticateToken, marketingRoutes);
+app.use('/api/reviews', authenticateToken, reviewsRoutes);
+app.use('/api/aggregator', authenticateToken, aggregatorRoutes);
+app.use('/api/tax', authenticateToken, taxRoutes);
+app.use('/api/docs', authenticateToken, documentsRoutes);
+app.use('/api/forecasting', authenticateToken, forecastingRoutes);
+app.use('/api/call-center', authenticateToken, callCenterRoutes);
+app.use('/api/queue', authenticateToken, queueRoutes);
+app.use('/api/gift-cards', authenticateToken, giftCardsRoutes);
+app.use('/api/membership', authenticateToken, membershipRoutes);
+app.use('/api/complaints', authenticateToken, complaintsRoutes);
+app.use('/api/messaging', authenticateToken, messagingRoutes);
+app.use('/api/api-ecosystem', authenticateToken, publicApiRoutes);
 
 // 404 handler
 app.use('*', notFound);

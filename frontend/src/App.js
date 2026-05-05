@@ -43,6 +43,28 @@ const AdvancedReservations = lazy(() => import('./pages/AdvancedReservations'));
 const Branches             = lazy(() => import('./pages/Branches'));
 const BusinessIntelligence = lazy(() => import('./pages/BusinessIntelligence'));
 
+// Phase 2 Enterprise Operations Pages
+const Production      = lazy(() => import('./pages/Production'));
+const FoodCosting     = lazy(() => import('./pages/FoodCosting'));
+const ProcurementIntel = lazy(() => import('./pages/ProcurementIntel'));
+const AssetManagement = lazy(() => import('./pages/AssetManagement'));
+const Maintenance     = lazy(() => import('./pages/Maintenance'));
+const Catering        = lazy(() => import('./pages/Catering'));
+const Banquet         = lazy(() => import('./pages/Banquet'));
+const Marketing       = lazy(() => import('./pages/Marketing'));
+const Reviews         = lazy(() => import('./pages/Reviews'));
+const Aggregator      = lazy(() => import('./pages/Aggregator'));
+const TaxCompliance   = lazy(() => import('./pages/TaxCompliance'));
+const Documents       = lazy(() => import('./pages/Documents'));
+const AIForecasting   = lazy(() => import('./pages/AIForecasting'));
+const CallCenter      = lazy(() => import('./pages/CallCenter'));
+const QueueManagement = lazy(() => import('./pages/QueueManagement'));
+const GiftCards       = lazy(() => import('./pages/GiftCards'));
+const Membership      = lazy(() => import('./pages/Membership'));
+const Complaints      = lazy(() => import('./pages/Complaints'));
+const Messaging       = lazy(() => import('./pages/Messaging'));
+const PublicAPI       = lazy(() => import('./pages/PublicAPI'));
+
 // Create React Query client with enhanced configuration
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -463,6 +485,28 @@ const AppContent = () => {
                       </ProtectedRoute>
                     }
                   />
+
+                  {/* Phase 2 Enterprise Operations Routes */}
+                  <Route path="/production/*" element={<ProtectedRoute requiredRole="admin"><Layout><Production /></Layout></ProtectedRoute>} />
+                  <Route path="/food-costing/*" element={<ProtectedRoute requiredRole="admin"><Layout><FoodCosting /></Layout></ProtectedRoute>} />
+                  <Route path="/procurement/*" element={<ProtectedRoute requiredRole="admin"><Layout><ProcurementIntel /></Layout></ProtectedRoute>} />
+                  <Route path="/assets/*" element={<ProtectedRoute requiredRole="admin"><Layout><AssetManagement /></Layout></ProtectedRoute>} />
+                  <Route path="/maintenance/*" element={<ProtectedRoute requiredRole="admin"><Layout><Maintenance /></Layout></ProtectedRoute>} />
+                  <Route path="/catering/*" element={<ProtectedRoute requiredRole="admin"><Layout><Catering /></Layout></ProtectedRoute>} />
+                  <Route path="/banquet/*" element={<ProtectedRoute requiredRole="admin"><Layout><Banquet /></Layout></ProtectedRoute>} />
+                  <Route path="/marketing/*" element={<ProtectedRoute requiredRole="admin"><Layout><Marketing /></Layout></ProtectedRoute>} />
+                  <Route path="/reviews/*" element={<ProtectedRoute requiredRole="admin"><Layout><Reviews /></Layout></ProtectedRoute>} />
+                  <Route path="/aggregator/*" element={<ProtectedRoute requiredRole="admin"><Layout><Aggregator /></Layout></ProtectedRoute>} />
+                  <Route path="/tax/*" element={<ProtectedRoute requiredRole="admin"><Layout><TaxCompliance /></Layout></ProtectedRoute>} />
+                  <Route path="/documents/*" element={<ProtectedRoute requiredRole="admin"><Layout><Documents /></Layout></ProtectedRoute>} />
+                  <Route path="/forecasting/*" element={<ProtectedRoute requiredRole="admin"><Layout><AIForecasting /></Layout></ProtectedRoute>} />
+                  <Route path="/call-center/*" element={<ProtectedRoute requiredRole="admin"><Layout><CallCenter /></Layout></ProtectedRoute>} />
+                  <Route path="/queue/*" element={<ProtectedRoute requiredRole="admin"><Layout><QueueManagement /></Layout></ProtectedRoute>} />
+                  <Route path="/gift-cards/*" element={<ProtectedRoute requiredRole="admin"><Layout><GiftCards /></Layout></ProtectedRoute>} />
+                  <Route path="/membership/*" element={<ProtectedRoute requiredRole="admin"><Layout><Membership /></Layout></ProtectedRoute>} />
+                  <Route path="/complaints/*" element={<ProtectedRoute requiredRole="admin"><Layout><Complaints /></Layout></ProtectedRoute>} />
+                  <Route path="/messaging/*" element={<ProtectedRoute requiredRole="admin"><Layout><Messaging /></Layout></ProtectedRoute>} />
+                  <Route path="/api-ecosystem/*" element={<ProtectedRoute requiredRole="admin"><Layout><PublicAPI /></Layout></ProtectedRoute>} />
 
                   {/* Catch all route */}
                   <Route path="*" element={<Navigate to="/" replace />} />
