@@ -1,162 +1,258 @@
-# 🍽️ **FoodPark — Feature List**
+# 🍽️ FoodPark — Full Feature List
 
-## **Core Order Management**
-- ✅ **Three Order Types**: Dine-in, Delivery, Takeaway (Direct)
-- ✅ **Order Lifecycle**: pending → preparing → ready → done (or cancelled)
-- ✅ **Order Items Management**: Add/remove items mid-order with automatic recalculation
-- ✅ **Order Status Transitions**: Enforced state machine (M-3)
-- ✅ **Order Numbering**: Auto-generated (ORDYYMMDD####) with collision detection & retry (M-5)
-- ✅ **Order Modifications History**: Audit trail of all changes
-- ✅ **Special Instructions**: Per-order and per-item notes
-
-## **Billing & Payments**
-- ✅ **Bill Printing**: Locks order after bill is printed
-- ✅ **Admin Bill Unlock**: Fix fat-finger mistakes (M-11)
-- ✅ **Multiple Payment Methods**: Cash, bKash, Nagad (M-5), Card
-- ✅ **Transaction Tracking**: Last 4 digits for card/wallet payments
-- ✅ **Automatic Order Completion**: Mark done on full payment
-- ✅ **Discount Application**: Per-order discounts on bill print
-- ✅ **Receipt History**: Paginated view of all printed bills (admin)
-- ✅ **Transaction Reports**: Payment method breakdown (admin)
-
-## **Pricing & Totals**
-- ✅ **VAT Calculation**: Per-item rates (default 15%)
-- ✅ **Service Charge**: 10% on dine-in orders only
-- ✅ **Delivery Fee**: Applied to delivery orders (M-4)
-- ✅ **Promotional Pricing**: Per-food-item overrides
-- ✅ **Automatic Recalculation**: On item add/remove
-
-## **Kitchen Operations (KDS)**
-- ✅ **Kitchen Display System**: Real-time order queue
-- ✅ **Item-Level Status**: queued → preparing → ready → cancelled
-- ✅ **Priority Levels**: Normal (0), High (1), Urgent (2)
-- ✅ **Time Tracking**: Elapsed time display per item
-- ✅ **Order Grouping**: Organized by order with table/customer info
-- ✅ **Auto-Refresh**: 30-second polling
-- ✅ **Status Filtering**: View by queued/preparing/ready
-
-## **Table Management**
-- ✅ **Table Grid**: Organized by 7 locations (Big House, Small House, AC Chad, AC Room, RB Garden, Garden, Lake Side)
-- ✅ **Table Status**: available → occupied → reserved
-- ✅ **Capacity Tracking**: 1–20 seats per table
-- ✅ **Visual Status Indicators**: Color-coded availability
-- ✅ **Quick Status Overview**: Today's occupancy stats
-- ✅ **Admin CRUD**: Create/edit/delete tables
-
-## **Reservations**
-- ✅ **Reservation Booking**: Date, time, party size, special requests
-- ✅ **Time Window Enforcement**: 10:00–23:00 only (M-6)
-- ✅ **Status Tracking**: pending → confirmed → completed/cancelled
-- ✅ **Pre-Orders**: Link orders to reservations (pre_order_id)
-- ✅ **Today's View**: Dashboard widget showing today's reservations
-- ✅ **No-Show Tracking**: Status history audit
-
-## **Delivery Management**
-- ✅ **Delivery Details**: Address, phone, advance/due amounts
-- ✅ **Order Time & Delivery Time**: Proper TIME columns (M-1)
-- ✅ **Delivery Status Pipeline**: pending → assigned → picked_up → delivered
-- ✅ **Advance Payment Tracking**: Partial/full payment upfront
-- ✅ **Delivery Fee**: Applied per order (M-4)
-- ✅ **Delivery Reports**: Revenue, completion rate, efficiency
-
-## **Menu Management**
-- ✅ **Categories**: Create/edit/delete food categories
-- ✅ **Food Items**: Name, description, price, promotional price, VAT rate, prep time
-- ✅ **Availability Toggle**: Mark items available/unavailable
-- ✅ **Category Organization**: Display order control
-- ✅ **Item Icons**: Category badges
-- ✅ **Admin UI**: Full CRUD for menu
-
-## **User Management**
-- ✅ **Three Roles**: Admin (full access), Waiter (operations), Kitchen (read-only)
-- ✅ **Role-Based Access**: Route guards + feature visibility
-- ✅ **User Activation**: Toggle active/inactive status
-- ✅ **Password Management**: Secure hashing (bcrypt)
-- ✅ **User Search**: By username, email, phone
-- ✅ **Profile Management**: Edit name, email, phone, password
-
-## **Dashboard & Analytics**
-- ✅ **Real-Time Stats**: Today's revenue, order count, active tables, kitchen queue
-- ✅ **Trend Indicators**: % change vs yesterday (M-12)
-- ✅ **Order Status Distribution**: Visual breakdown by status
-- ✅ **Order Type Distribution**: Dine-in vs Delivery vs Takeaway
-- ✅ **Recent Orders**: Last orders with details
-- ✅ **Kitchen Status Widget**: Current workload summary
-- ✅ **Table Occupancy Widget**: Live table status
-- ✅ **Menu Performance**: Top-selling items & categories (7-day view)
-- ✅ **Drill-Down**: Click stats to see detailed orders
-
-## **Reports & Analytics**
-- ✅ **Sales Reports**: Daily, weekly, monthly revenue breakdown
-- ✅ **Menu Performance**: Items & categories by quantity sold
-- ✅ **Staff Performance**: Orders by waiter, completion times
-- ✅ **Delivery Analytics**: Completion rate, efficiency, revenue
-- ✅ **Cancellation Reports**: Reasons, frequency, financial impact
-- ✅ **Date Range Filtering**: Custom period analysis
-- ✅ **Summary Totals**: Revenue, VAT, service charge, discounts
-
-## **System Settings**
-- ✅ **Key-Value Configuration**: Restaurant name, address, phone, currency
-- ✅ **Pricing Settings**: VAT %, service charge %, delivery fee
-- ✅ **Type Validation**: Number, boolean, string, JSON settings
-- ✅ **Editable Toggle**: Lock/unlock settings
-- ✅ **Admin-Only Access**: Protect from unauthorized changes
-- ✅ **Category Grouping**: Organize settings by type
-
-## **Security & Audit**
-- ✅ **JWT Authentication**: Access tokens (15m) + refresh tokens (7d)
-- ✅ **Role-Based Authorization**: Admin/waiter/kitchen route guards
-- ✅ **Password Security**: bcrypt hashing, 6+ character requirement
-- ✅ **Session Management**: JWT blacklist, token revocation on logout
-- ✅ **Audit Logging**: User actions, old/new values, IP, timestamp
-- ✅ **CORS Protection**: Localhost-only in dev, env-configured in prod (C-7)
-- ✅ **Order Locking**: Bill-printed orders prevent modifications
-
-## **Real-Time Features (Socket.IO)**
-- ✅ **Live Notifications**: New orders, status updates, table changes
-- ✅ **Kitchen Updates**: Real-time item status changes
-- ✅ **Order Notifications**: Status updates across all clients
-- ✅ **Room-Based Broadcasting**: Target specific roles/tables/orders
-- ✅ **Auto-Reconnect**: Exponential backoff with max 5 attempts
-- ✅ **Live Indicator**: UI shows connection status
-
-## **Frontend Features**
-- ✅ **Responsive Design**: Mobile, tablet, desktop (Tailwind CSS)
-- ✅ **Dark Mode Ready**: Complete theming support
-- ✅ **React Query Caching**: 5-min stale, 10-min cache
-- ✅ **Form Validation**: Client & server-side
-- ✅ **Error Boundaries**: Graceful error handling
-- ✅ **Loading States**: Spinners, skeleton screens
-- ✅ **Toast Notifications**: Success/error feedback
-- ✅ **Modal Dialogs**: Order creation, payment, edits
-- ✅ **Data Tables**: Sortable, filterable, paginated
-- ✅ **Charts**: Recharts for sales, menu performance, status distribution
-
-## **Data Quality**
-- ✅ **Inventory Tracking**: Food stock levels (framework in place)
-- ✅ **Order Validation**: Type, items, dates, amounts
-- ✅ **Reservation Validation**: Date in future, time 10:00–23:00
-- ✅ **Payment Validation**: Amount ≤ remaining balance
-- ✅ **Constraint Enforcement**: DB CHECK + app-layer checks
-
-## **Developer Experience**
-- ✅ **Environment Configuration**: `.env.example` with all required vars (L-8)
-- ✅ **Database Schema**: SQL file with all tables & relationships
-- ✅ **API Documentation**: RESTful endpoints (implicit from code)
-- ✅ **Error Messages**: Structured error responses with codes
-- ✅ **Logging**: Console logs + backend health checks
-- ✅ **Code Quality**: Removed dead code (M-10), cleaned requires (L-2)
+> **Stack:** Node.js / Express · MySQL · React 18 · Socket.IO · Tailwind CSS  
+> **Last updated:** May 2026 — v2.0 (12-module ERP edition)
 
 ---
 
-## **Notable Features NOT Implemented**
-- ❌ L-3: Settings numeric type validation (partially done)
-- ❌ L-4: Form state preservation across navigation
-- ❌ L-7: Advance payment enforcement
-- ❌ M-2: Inventory UI management
-- ❌ M-8: httpOnly cookie usage (infrastructure only)
-- ❌ M-9: Per-item VAT in reports alignment
-- ⚠️ M-10: delivery_tracking table dead (infrastructure removed from inserts)
+## 1. Core Order Management
+- ✅ Three order types: Dine-in, Delivery, Takeaway
+- ✅ Order lifecycle: `pending → preparing → ready → done` (or `cancelled`)
+- ✅ Add / remove items mid-order with automatic total recalculation
+- ✅ Enforced status-machine transitions (no skipping states)
+- ✅ Auto-generated order numbers `ORDYYMMDD####` with collision-retry
+- ✅ Full modifications history — audit trail of every change
+- ✅ Per-order and per-item special instructions
+
+## 2. Billing & Payments
+- ✅ Bill print locks the order against further edits
+- ✅ Admin bill-unlock to correct fat-finger mistakes
+- ✅ Payment methods: Cash, Card, bKash, Nagad
+- ✅ Last-4 digits stored for card / wallet transactions
+- ✅ Order auto-completes on full payment
+- ✅ Per-order discount application at bill time
+- ✅ Paginated receipt history (admin)
+- ✅ Payment-method breakdown reports
+
+## 3. Pricing & Totals
+- ✅ Per-item VAT rates (default 5 %)
+- ✅ 10 % service charge on dine-in only
+- ✅ Configurable delivery fee per order
+- ✅ Promotional / override pricing per menu item
+- ✅ All totals recalculated live on every cart change
+
+## 4. Kitchen Display System (KDS)
+- ✅ Real-time order queue for kitchen staff
+- ✅ Item-level status: `queued → preparing → ready → cancelled`
+- ✅ Priority flags: Normal / High / Urgent
+- ✅ Elapsed-time display per item
+- ✅ Orders grouped with table / customer context
+- ✅ 30-second auto-refresh polling
+- ✅ Filter by status (queued / preparing / ready)
+
+## 5. Table Management
+- ✅ Visual grid organised by 7 sections (Big House, Small House, AC Chad, AC Room, RB Garden, Garden, Lake Side)
+- ✅ Status: `available → occupied → reserved`
+- ✅ Capacity 1–20 seats, colour-coded availability
+- ✅ Today's occupancy stats widget
+- ✅ Admin CRUD — create / edit / delete tables
+
+## 6. Reservations
+- ✅ Bookings with date, time, party size, special requests
+- ✅ Time-window enforcement: 10:00–23:00
+- ✅ Status: `pending → confirmed → completed / cancelled`
+- ✅ Link reservations to pre-orders (`pre_order_id`)
+- ✅ Today's reservations dashboard widget
+- ✅ No-show tracking via status history
+
+## 7. Delivery Management
+- ✅ Customer address, phone, advance / due amounts
+- ✅ Proper TIME columns for order time and target delivery time
+- ✅ Pipeline: `pending → assigned → picked_up → delivered`
+- ✅ Advance payment tracking (partial or full)
+- ✅ Delivery reports: revenue, completion rate, efficiency
+
+## 8. Menu Management
+- ✅ Category CRUD with display-order control
+- ✅ Food items: name, description, price, promo price, VAT rate, prep time
+- ✅ Availability toggle per item
+- ✅ Category badges / icons
+- ✅ Full admin CRUD
+
+## 9. User & Role Management
+- ✅ Three roles: Admin, Waiter, Kitchen
+- ✅ Role-based route guards + feature visibility
+- ✅ Activate / deactivate users
+- ✅ bcrypt password hashing, 6-char minimum
+- ✅ Search by username, email, phone
+- ✅ Self-service profile edits
+
+## 10. Dashboard
+- ✅ Live KPIs: today's revenue, order count, active tables, kitchen queue length
+- ✅ Trend indicators (% vs yesterday)
+- ✅ Order status distribution chart
+- ✅ Order type distribution (dine-in / delivery / takeaway)
+- ✅ Recent orders list
+- ✅ Kitchen workload widget
+- ✅ Table occupancy widget
+- ✅ Top-selling items & categories (7-day rolling)
+- ✅ Drill-down from any stat to underlying orders
+
+## 11. Reports & Analytics
+- ✅ Sales reports: daily / weekly / monthly revenue
+- ✅ Menu performance: items & categories by quantity sold
+- ✅ Staff performance: orders per waiter, completion times
+- ✅ Delivery analytics: completion rate, efficiency, revenue
+- ✅ Cancellation reports: reasons, frequency, financial impact
+- ✅ Custom date-range filtering
+- ✅ Summary totals: revenue, VAT, service charge, discounts
+
+## 12. System Settings
+- ✅ Key-value config: restaurant name, address, phone, currency
+- ✅ Pricing knobs: VAT %, service charge %, delivery fee
+- ✅ Type validation: number / boolean / string / JSON
+- ✅ Editable toggle to lock individual settings
+- ✅ Admin-only access protection
+- ✅ Settings grouped by category
+
+## 13. Security & Audit
+- ✅ JWT access tokens (15 min) + refresh tokens (7 days)
+- ✅ Role-based authorization on every API route
+- ✅ bcrypt password hashing
+- ✅ Token blacklist with `INSERT IGNORE` (no crash on duplicate JTI)
+- ✅ Session table — revoke all sessions on logout
+- ✅ Audit log: user, action, old value, new value, IP, timestamp
+- ✅ CORS: localhost-only in dev, env-configured in prod
+- ✅ Rate limiting middleware (memory store in dev)
+- ✅ Order locking — bill-printed orders block modifications
+
+## 14. Real-Time (Socket.IO)
+- ✅ Live notifications: new orders, status changes, table updates
+- ✅ Kitchen item status changes broadcast instantly
+- ✅ Room-based broadcasting (roles / tables / orders)
+- ✅ Exponential back-off reconnect (max 5 attempts)
+- ✅ Connection status indicator in the UI
+
+## 15. Frontend UX
+- ✅ Responsive layout: mobile / tablet / desktop (Tailwind CSS)
+- ✅ Lazy-loaded page chunks (React.lazy + Suspense)
+- ✅ React Query: 5-min stale / 10-min cache
+- ✅ Client-side + server-side form validation
+- ✅ Error boundaries with graceful fallback UI
+- ✅ Loading spinners and skeleton screens
+- ✅ Toast notifications (success / error / info)
+- ✅ Modal dialogs for order creation, payment, edits
+- ✅ Sortable, filterable, paginated data tables
+- ✅ Recharts: sales bar charts, pie charts, performance bars
+- ✅ URL-based tab routing on all ERP module pages (deep-linkable)
+
+---
+
+## 16. ERP — Inventory Management (`/inventory`)
+- ✅ Inventory dashboard: stock value, low-stock count, expiry alerts
+- ✅ Ingredient master: CRUD with unit, category, reorder point
+- ✅ Recipe / BOM builder: link menu items to raw ingredients with quantities
+- ✅ Stock ledger: every movement logged with reason and user
+- ✅ Physical count sessions: draft → in-progress → completed with variance report
+- ✅ Waste & expiry tracking: batch-level expiry dates, waste reasons
+- ✅ Reorder alerts: automatic flag when stock drops below threshold
+
+## 17. ERP — Purchase Orders (`/purchase`)
+- ✅ Full PO lifecycle: draft → submitted → approved → received → invoiced
+- ✅ Goods receiving notes (GRN) linked to POs
+- ✅ **3-Way Match**: PO qty / price vs GRN qty vs supplier invoice — flags qty-variance and price-variance
+- ✅ Supplier invoice management against GRNs
+- ✅ Purchase returns with reason tracking
+- ✅ **Landed Cost allocation**: freight + customs + handling spread across GRN lines by weight / value / qty
+
+## 18. ERP — Supplier Management (`/suppliers`)
+- ✅ Supplier directory with contact, payment terms, lead time
+- ✅ Accounts-payable ledger per supplier
+- ✅ Payables aging buckets: current / 30 / 60 / 90+ days
+- ✅ Delivery performance scorecard (on-time %, quality score)
+- ✅ **ABC Segmentation**: classify suppliers by annual spend — strategic (A), preferred (B), routine (C)
+
+## 19. ERP — CRM & Loyalty (`/crm`)
+- ✅ Customer directory with order history and contact info
+- ✅ Loyalty tier engine: Bronze / Silver / Gold / Platinum thresholds
+- ✅ Points earn / redeem rules per tier
+- ✅ Coupon & promo code management with usage tracking
+- ✅ RFM segmentation: Champions, Loyal, At-Risk, Lost, New
+- ✅ **CLV & Cohort analysis**: avg lifetime value, purchase frequency, cohort retention heatmap (month-on-month)
+- ✅ Customer feedback collection and manager-alert on low scores
+
+## 20. ERP — Expense Management (`/expenses`)
+- ✅ Expense entry with category, vendor, amount, receipt upload flag
+- ✅ Approval queue: submit → pending → approved / rejected
+- ✅ Recurring expense scheduler (weekly / monthly / annual)
+- ✅ Budget vs actual comparison by category and period
+
+## 21. ERP — Accounting (`/accounting`)
+- ✅ Double-entry journal entries with debit / credit validation
+- ✅ Chart of accounts with type (asset / liability / equity / income / expense)
+- ✅ Bank reconciliation: match bank statement lines to journal entries
+- ✅ VAT summary report: output, input, net payable
+- ✅ P&L report: revenue, COGS, gross profit, net profit
+- ✅ **Period close checklist**: 8-step month-end checklist (reconcile, post adjustments, lock period, generate reports)
+
+## 22. ERP — HR & Payroll (`/hr`)
+- ✅ Shift scheduling: weekly shift grid per employee
+- ✅ Attendance log: clock-in / clock-out with late / absent flags
+- ✅ Overtime calculation: 1.5× rate for hours over 8/day
+- ✅ Payroll run: gross pay, deductions, net pay per employee
+- ✅ **Tips & commissions**: rider delivery commission, FOH tip-pool split, performance bonuses
+- ✅ Payslip generation per employee (PDF-ready)
+
+## 23. ERP — QR Ordering (`/qr-ordering`)
+- ✅ QR code generation per table with download
+- ✅ Active session monitor: table, items ordered, session duration
+- ✅ **Cart & payment view**: live cart totals, VAT breakdown, payment method, awaiting-checkout queue
+- ✅ **Order status & feedback**: real-time order stage (preparing / ready / served), star-rating collection per order
+- ✅ Self-ordering analytics: sessions, orders, revenue by day
+
+## 24. ERP — Fleet & Delivery (`/fleet`)
+- ✅ Rider directory: contact, zone, vehicle, commission rate
+- ✅ Delivery zone management with radius and fee override
+- ✅ Assignment board: match open delivery orders to available riders
+- ✅ **Live tracking dashboard**: active riders grid with status badges and ETA table
+- ✅ Commission reports: deliveries, base pay, bonuses per rider
+
+## 25. ERP — Advanced Reservations (`/advanced-reservations`)
+- ✅ Interactive floor-map view: drag-and-drop table assignment
+- ✅ Booking engine: availability check, party-size matching, confirmation flow
+- ✅ Deposit management: collect and track pre-paid deposits
+- ✅ Waitlist queue with auto-notify on table availability
+- ✅ Reservation analytics: covers, no-show rate, peak-time heatmap
+
+## 26. ERP — Branch Management (`/branches`)
+- ✅ Multi-branch overview: revenue, orders, occupancy per branch
+- ✅ Branch setup: name, address, timezone, working hours
+- ✅ Inter-branch stock transfers with approval workflow
+- ✅ **Data isolation controls**: role-scoping table, per-branch API access rules, Socket.IO room isolation status
+- ✅ Comparative report: side-by-side KPIs across all branches
+
+## 27. ERP — Business Intelligence (`/bi`)
+- ✅ Peak-hours heatmap: covers × hour-of-day × day-of-week
+- ✅ Menu engineering matrix: Stars / Plowhorses / Puzzles / Dogs (margin vs popularity)
+- ✅ Customer cohort retention matrix
+- ✅ Demand forecast: 7-day and 30-day revenue projections
+- ✅ Profitability breakdown: revenue, COGS, labour, overhead, net margin per branch
+
+---
+
+## Developer Experience
+- ✅ `.env.example` with all required variables documented
+- ✅ `database/schema.sql` — complete DDL for all tables
+- ✅ `backend/scripts/migrate.js` and `seed.js` for one-command setup
+- ✅ Structured API error responses with machine-readable `code` fields
+- ✅ DB helper supports operator objects (`$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$like`)
+- ✅ `INSERT IGNORE` helper for idempotent upsert-style inserts
+- ✅ QA Guide page (`/qa-guide`) — 80+ linked test suites with direct deep-link navigation to each ERP sub-section
+- ✅ ERP Architecture doc (`ERP-ARCHITECTURE.md`) — 3 000-line design reference
+
+---
+
+## Known Gaps / Roadmap
+| # | Item | Priority |
+|---|------|----------|
+| 1 | Real backend API for all 12 ERP modules (currently mock data) | High |
+| 2 | Unit + integration test suite (Jest / Supertest) | High |
+| 3 | Advance payment enforcement on delivery orders | Medium |
+| 4 | Per-item VAT alignment between orders and reports | Medium |
+| 5 | Form-state preservation across navigation | Low |
+| 6 | Settings numeric-type server validation | Low |
+| 7 | Mobile PWA / push notifications | Low |
+
 
 ---
 
