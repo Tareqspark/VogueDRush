@@ -1068,7 +1068,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   // ── STEP: MENU + CART ─────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
-      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100vh-2rem)]"
+      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-2 lg:my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100dvh-1rem)] lg:max-h-[calc(100vh-2rem)]"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
         {/* Left: Menu */}
         <div className="flex-1 flex flex-col min-h-[45vh] lg:min-h-0 border-r border-slate-100">
@@ -1136,7 +1136,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
         </div>
 
         {/* Right: Cart */}
-        <div className="w-full lg:w-80 flex flex-col bg-slate-50 border-t lg:border-t-0 max-h-[42vh] lg:max-h-none">
+        <div className="w-full lg:w-80 flex flex-col bg-slate-50 border-t lg:border-t-0 max-h-[48vh] lg:max-h-none overflow-hidden">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-white">
             <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
             <h2 className="font-black text-slate-800">Cart ({cart.length})</h2>
@@ -1168,8 +1168,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
               </div>
             ))}
           </div>
-          <div className="p-4 border-t border-slate-200 space-y-3 bg-white">
-            <textarea className="textarea text-sm h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
+          <div className="p-4 border-t border-slate-200 space-y-3 bg-white sticky bottom-0 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <textarea className="textarea text-sm h-14 lg:h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
               <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>৳{subtotal.toFixed(2)}</span></div>
               <div className="flex justify-between text-slate-500"><span>VAT (15%)</span><span>৳{vat.toFixed(2)}</span></div>
