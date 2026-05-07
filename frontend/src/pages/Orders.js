@@ -1068,10 +1068,10 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   // ── STEP: MENU + CART ─────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
-      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-2 lg:my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100dvh-1rem)] lg:max-h-[calc(100vh-2rem)]"
+      <div className="relative bg-white flex flex-col md:flex-row w-full max-w-5xl mx-auto my-2 md:my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)]"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
         {/* Left: Menu */}
-        <div className="flex-1 flex flex-col min-h-[45vh] lg:min-h-0 border-r border-slate-100">
+        <div className="flex-1 flex flex-col min-h-[45vh] md:min-h-0 md:border-r border-slate-100">
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white">
             <div className="flex items-center gap-3 mb-3">
               <button onClick={() => orderType === 'dine_in' ? setStep('table') : setStep('type')}
@@ -1130,13 +1130,16 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
                   {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
                 </div>
+                <div className="mt-2 text-right">
+                  <span className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">+ Add</span>
+                </div>
               </button>
             ))}
           </div>
         </div>
 
         {/* Right: Cart */}
-        <div className="w-full lg:w-80 flex flex-col bg-slate-50 border-t lg:border-t-0 max-h-[48vh] lg:max-h-none overflow-hidden">
+        <div className="w-full md:w-80 flex flex-col bg-slate-50 border-t md:border-t-0 max-h-[48vh] md:max-h-none overflow-hidden">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-white">
             <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
             <h2 className="font-black text-slate-800">Cart ({cart.length})</h2>
@@ -1169,7 +1172,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
             ))}
           </div>
           <div className="p-4 border-t border-slate-200 space-y-3 bg-white sticky bottom-0 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-            <textarea className="textarea text-sm h-14 lg:h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
+            <textarea className="textarea text-sm h-14 md:h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
               <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>৳{subtotal.toFixed(2)}</span></div>
               <div className="flex justify-between text-slate-500"><span>VAT (15%)</span><span>৳{vat.toFixed(2)}</span></div>
