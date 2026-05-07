@@ -1078,7 +1078,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
       <div className="relative bg-white flex flex-col md:flex-row w-full max-w-5xl mx-auto my-2 md:my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)]"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
         {/* Left: Menu */}
-        <div className="flex-1 flex flex-col min-h-[45vh] md:min-h-0 md:border-r border-slate-100">
+        <div className="flex-1 min-w-0 flex flex-col min-h-[45vh] md:min-h-0 md:border-r border-slate-100">
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white">
             <div className="flex items-center gap-3 mb-3">
               <button onClick={() => orderType === 'dine_in' ? setStep('table') : setStep('type')}
@@ -1156,7 +1156,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
         </div>
 
         {/* Right: Cart */}
-        <div className="w-full md:w-80 flex flex-col bg-slate-50 border-t md:border-t-0 max-h-[48vh] md:max-h-none overflow-hidden">
+        <div className="w-full md:w-80 md:min-w-[20rem] md:flex-shrink-0 flex flex-col bg-slate-50 border-t md:border-t-0 max-h-[48vh] md:max-h-none overflow-hidden">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-white">
             <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
             <h2 className="font-black text-slate-800">Cart ({cart.length})</h2>
