@@ -2,9 +2,13 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
+const defaultApiBaseURL = typeof window !== 'undefined'
+  ? `${window.location.origin}/api`
+  : 'http://localhost:5000/api';
+
 // Create axios instance
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  baseURL: process.env.REACT_APP_API_URL || defaultApiBaseURL,
   timeout: 10000,
   withCredentials: true, // C-1 fix: send httpOnly cookies on every request
 });

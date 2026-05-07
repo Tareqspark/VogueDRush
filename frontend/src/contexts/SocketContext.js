@@ -3,6 +3,10 @@ import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
 
+const defaultSocketURL = typeof window !== 'undefined'
+  ? window.location.origin
+  : 'http://localhost:5000';
+
 // Create context
 const SocketContext = createContext();
 
@@ -61,7 +65,7 @@ export const SocketProvider = ({ children }) => {
     }
 
     // Initialize socket connection with enhanced configuration
-    const socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000', {
+    const socket = io(process.env.REACT_APP_SOCKET_URL || defaultSocketURL, {
       auth: {
         token: accessToken,
       },
