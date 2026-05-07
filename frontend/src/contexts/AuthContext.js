@@ -267,7 +267,10 @@ export const AuthProvider = ({ children }) => {
       toast.success(`Welcome back, ${user.full_name}!`);
       return { success: true };
     } catch (error) {
-      const errorMessage = error.response?.data?.error
+      const apiError = error.response?.data?.error;
+      const errorMessage = (typeof apiError === 'string' && apiError)
+        || (apiError && typeof apiError.message === 'string' && apiError.message)
+        || error.response?.data?.message
         || (error.code === 'ERR_NETWORK' ? 'Cannot connect to server. Please ensure backend is running on port 5000.' : 'Login failed');
       dispatch({
         type: AUTH_ACTIONS.LOGIN_FAILURE,
