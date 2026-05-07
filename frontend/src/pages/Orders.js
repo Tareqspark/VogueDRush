@@ -859,6 +859,13 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   const categories = categoriesData || [];
   const items = itemsData?.items || [];
 
+  const getItemId = (item) => item?.id ?? item?.food_item_id;
+  const getItemPrice = (item) => {
+    const base = item?.promotional_price ?? item?.price ?? 0;
+    const parsed = parseFloat(base);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
   // Group tables by location in display order
   const locationOrder = ['Big House', 'Small House', 'AC Chad', 'AC Room', 'RB Garden', 'Garden', 'Lake Side'];
   const tablesByLocation = tables.reduce((acc, t) => {
@@ -885,12 +892,12 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   };
 
   const addToCart = (item) => {
-    const itemId = item.id ?? item.food_item_id;
+    const itemId = getItemId(item);
     if (!itemId) return;
     setCart(prev => {
       const existing = prev.find(c => c.id === itemId);
       if (existing) return prev.map(c => c.id === itemId ? { ...c, qty: c.qty + 1 } : c);
-      return [...prev, { id: itemId, name: item.name, price: item.promotional_price || item.price, qty: 1 }];
+      return [...prev, { id: itemId, name: item.name, price: getItemPrice(item), qty: 1 }];
     });
   };
 
@@ -1122,8 +1129,9 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
           {/* Items grid */}
           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-3 content-start">
             {items.map(item => (
-              <button type="button" key={item.id ?? item.food_item_id ?? item.name} onClick={() => addToCart(item)}
-                className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95">
+              <div key={item.id ?? item.food_item_id ?? item.name}
+                onClick={() => addToCart(item)}
+                className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95 cursor-pointer">
                 <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
                 <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
                 <div className="mt-2 flex items-center justify-between">
@@ -1131,9 +1139,18 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
                 </div>
                 <div className="mt-2 text-right">
-                  <span className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">+ Add</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addToCart(item);
+                    }}
+                    className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
+                  >
+                    + Add
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
