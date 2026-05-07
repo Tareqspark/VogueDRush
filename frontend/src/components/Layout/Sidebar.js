@@ -143,7 +143,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         <div className="fixed inset-0 z-40 bg-sky-950/20 backdrop-blur-sm lg:hidden" onClick={onClose} />
       )}
 
-      <aside className={`sidebar flex flex-col ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+      <aside className={`sidebar flex flex-col ${isOpen ? 'translate-x-0 sidebar-open' : '-translate-x-full'} lg:translate-x-0`}>
 
         {/* ── Brand ── */}
         <div className="flex items-center justify-between h-16 px-5 border-b border-sky-100">

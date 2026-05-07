@@ -26,6 +26,14 @@ const TYPE_CARD_STYLES = {
   direct: 'border-l-emerald-400 bg-emerald-50/20',
 };
 
+const getApiErrorMessage = (error, fallback) => {
+  const apiError = error?.response?.data?.error;
+  if (typeof apiError === 'string' && apiError) return apiError;
+  if (apiError && typeof apiError.message === 'string' && apiError.message) return apiError.message;
+  if (typeof error?.response?.data?.message === 'string' && error.response.data.message) return error.response.data.message;
+  return fallback;
+};
+
 export default function Orders() {
   const { api, user } = useAuth();
   const queryClient = useQueryClient();
@@ -57,7 +65,7 @@ export default function Orders() {
       queryClient.invalidateQueries('orders');
       queryClient.invalidateQueries(['order-detail', id]);
     } catch (e) {
-      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to update');
+      toast.error(getApiErrorMessage(e, 'Failed to update'));
     }
   };
 
@@ -68,7 +76,7 @@ export default function Orders() {
       queryClient.invalidateQueries(['order-detail', id]);
       return res.data;
     } catch (e) {
-      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to print bill');
+      toast.error(getApiErrorMessage(e, 'Failed to print bill'));
       return null;
     }
   };
@@ -536,7 +544,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
       queryClient.invalidateQueries(['order-detail', orderId]);
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Failed to update order');
+      toast.error(getApiErrorMessage(e, 'Failed to update order'));
     } finally {
       setSaving(false);
     }
@@ -760,7 +768,7 @@ function HoldOrderModal({ api, order, onClose, onHeld }) {
       }
       onHeld();
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Failed to hold order');
+      toast.error(getApiErrorMessage(e, 'Failed to hold order'));
     } finally {
       setSaving(false);
     }
@@ -923,7 +931,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
       toast.success('Order created!');
       onCreated();
     } catch (e) {
-      toast.error(e.response?.data?.error?.message || e.response?.data?.error || 'Failed to create order');
+      toast.error(getApiErrorMessage(e, 'Failed to create order'));
     } finally {
       setSubmitting(false);
     }

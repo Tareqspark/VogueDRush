@@ -229,7 +229,8 @@ body {
 
 /* ─── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
-  .sidebar { @apply -translate-x-full; }
+  .sidebar:not(.sidebar-open) { @apply -translate-x-full; }
+  .sidebar.sidebar-open { @apply translate-x-0; }
 }
 
 
@@ -280,11 +281,11 @@ body {
 
 /* Responsive utilities */
 @media (max-width: 768px) {
-  .sidebar {
+  .sidebar:not(.sidebar-open) {
     @apply -translate-x-full;
   }
-  
-  .sidebar-open {
+
+  .sidebar.sidebar-open {
     @apply translate-x-0;
   }
   
