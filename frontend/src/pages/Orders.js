@@ -885,10 +885,12 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   };
 
   const addToCart = (item) => {
+    const itemId = item.id ?? item.food_item_id;
+    if (!itemId) return;
     setCart(prev => {
-      const existing = prev.find(c => c.id === item.id);
-      if (existing) return prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c);
-      return [...prev, { id: item.id, name: item.name, price: item.promotional_price || item.price, qty: 1 }];
+      const existing = prev.find(c => c.id === itemId);
+      if (existing) return prev.map(c => c.id === itemId ? { ...c, qty: c.qty + 1 } : c);
+      return [...prev, { id: itemId, name: item.name, price: item.promotional_price || item.price, qty: 1 }];
     });
   };
 
@@ -1066,10 +1068,10 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   // ── STEP: MENU + CART ─────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
-      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in"
+      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100 animate-fade-in max-h-[calc(100vh-2rem)]"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
         {/* Left: Menu */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-slate-100">
+        <div className="flex-1 flex flex-col min-h-[45vh] lg:min-h-0 border-r border-slate-100">
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white">
             <div className="flex items-center gap-3 mb-3">
               <button onClick={() => orderType === 'dine_in' ? setStep('table') : setStep('type')}
@@ -1120,7 +1122,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
           {/* Items grid */}
           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-3 content-start">
             {items.map(item => (
-              <button key={item.id} onClick={() => addToCart(item)}
+              <button type="button" key={item.id ?? item.food_item_id ?? item.name} onClick={() => addToCart(item)}
                 className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95">
                 <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
                 <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
@@ -1134,7 +1136,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
         </div>
 
         {/* Right: Cart */}
-        <div className="w-full lg:w-80 flex flex-col bg-slate-50">
+        <div className="w-full lg:w-80 flex flex-col bg-slate-50 border-t lg:border-t-0 max-h-[42vh] lg:max-h-none">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-white">
             <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
             <h2 className="font-black text-slate-800">Cart ({cart.length})</h2>
@@ -1152,14 +1154,14 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   <div className="text-xs text-slate-400">৳{parseFloat(c.price).toFixed(0)} each</div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => changeQty(c.id, -1)} className="h-6 w-6 rounded-lg bg-slate-100 flex items-center justify-center hover:bg-slate-200">
+                  <button type="button" onClick={() => changeQty(c.id, -1)} className="h-6 w-6 rounded-lg bg-slate-100 flex items-center justify-center hover:bg-slate-200">
                     <MinusIcon className="h-3 w-3 text-slate-600" />
                   </button>
                   <span className="w-6 text-center text-sm font-black text-slate-800">{c.qty}</span>
-                  <button onClick={() => changeQty(c.id, 1)} className="h-6 w-6 rounded-lg bg-sky-100 flex items-center justify-center hover:bg-sky-200">
+                  <button type="button" onClick={() => changeQty(c.id, 1)} className="h-6 w-6 rounded-lg bg-sky-100 flex items-center justify-center hover:bg-sky-200">
                     <PlusIcon className="h-3 w-3 text-sky-600" />
                   </button>
-                  <button onClick={() => setCart(p => p.filter(x => x.id !== c.id))} className="h-6 w-6 rounded-lg flex items-center justify-center text-rose-400 hover:bg-rose-50 ml-1">
+                  <button type="button" onClick={() => setCart(p => p.filter(x => x.id !== c.id))} className="h-6 w-6 rounded-lg flex items-center justify-center text-rose-400 hover:bg-rose-50 ml-1">
                     <TrashIcon className="h-3 w-3" />
                   </button>
                 </div>
