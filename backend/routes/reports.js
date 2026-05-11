@@ -769,4 +769,442 @@ const convertToCSV = (data) => {
   return [csvHeaders, ...csvRows].join('\n');
 };
 
+// ── Today's Revenue (status=done orders with payment info) ────────
+router.get('/today-revenue', async (req, res) => {
+  try {
+    const { start_date, end_date, page = 1, limit = 200 } = req.query;
+    const today = new Date().toISOString().split('T')[0];
+    const from = start_date || today;
+    const to   = end_date   || today;
+    const limitInt = Math.min(parseInt(limit) || 200, 500);
+    const offset   = (parseInt(page) - 1) * limitInt;
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.order_type, o.customer_name, o.status,
+             o.subtotal, o.vat_amount, o.service_charge, o.discount_amount,
+             o.delivery_fee, o.total_amount, o.created_at,
+             u.full_name AS waiter_name,
+             p.payment_method, p.amount AS paid_amount, p.transaction_id AS last4
+      FROM orders o
+      LEFT JOIN users u ON o.waiter_id = u.id
+      LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
+      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ?
+      ORDER BY o.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [from, to, limitInt, offset]);
+
+    const [totals] = await query(`
+      SELECT COUNT(*) AS total_orders,
+             SUM(total_amount)    AS total_revenue,
+             SUM(vat_amount)      AS total_vat,
+             SUM(discount_amount) AS total_discount,
+             SUM(service_charge)  AS total_service_charge
+      FROM orders WHERE status = 'done' AND DATE(created_at) BETWEEN ? AND ?
+    `, [from, to]);
+
+    res.json({ orders, totals, pagination: { page: parseInt(page), limit: limitInt, total: parseInt(totals.total_orders) } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── VAT Report ────────────────────────────────────────────────────
+router.get('/vat-report', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const daily = await query(`
+      SELECT DATE(created_at) AS date,
+             COUNT(*)             AS orders,
+             SUM(total_amount)    AS gross,
+             SUM(vat_amount)      AS vat_collected,
+             SUM(subtotal)        AS net_sales
+      FROM orders WHERE status = 'done' ${df}
+      GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 90
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*)          AS total_orders,
+             SUM(total_amount) AS total_revenue,
+             SUM(vat_amount)   AS total_vat,
+             SUM(subtotal)     AS total_net_sales
+      FROM orders WHERE status = 'done' ${df}
+    `, v);
+
+    res.json({ daily, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Discount Report ───────────────────────────────────────────────
+router.get('/discount-report', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const byUser = await query(`
+      SELECT u.full_name, u.username,
+             COUNT(o.id)             AS order_count,
+             SUM(o.discount_amount)  AS total_discount,
+             AVG(o.discount_amount)  AS avg_discount
+      FROM orders o JOIN users u ON o.waiter_id = u.id
+      WHERE o.status = 'done' AND o.discount_amount > 0 ${df}
+      GROUP BY u.id, u.full_name, u.username ORDER BY total_discount DESC
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*)                AS orders_with_discount,
+             SUM(discount_amount)    AS total_discount
+      FROM orders WHERE status = 'done' AND discount_amount > 0 ${df}
+    `, v);
+
+    const orders = await query(`
+      SELECT o.order_number, o.customer_name, o.order_type, o.total_amount,
+             o.discount_amount, o.created_at, u.full_name AS waiter_name
+      FROM orders o JOIN users u ON o.waiter_id = u.id
+      WHERE o.status = 'done' AND o.discount_amount > 0 ${df}
+      ORDER BY o.discount_amount DESC LIMIT 200
+    `, v);
+
+    res.json({ by_user: byUser, totals, orders });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── User Sales Summary ────────────────────────────────────────────
+router.get('/user-summary', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const users = await query(`
+      SELECT u.full_name, u.username,
+             COUNT(o.id)             AS orders_completed,
+             SUM(o.total_amount)     AS total_sales,
+             SUM(p.amount)           AS total_collected,
+             SUM(o.discount_amount)  AS total_discount,
+             SUM(o.vat_amount)       AS total_vat,
+             AVG(o.total_amount)     AS avg_order
+      FROM users u
+      LEFT JOIN orders o  ON o.waiter_id = u.id AND o.status = 'done' ${df}
+      LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
+      WHERE u.is_active = 1
+      GROUP BY u.id, u.full_name, u.username ORDER BY total_sales DESC
+    `, v);
+
+    res.json({ users });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Collection Summary (dine-in / takeaway / delivery per day) ────
+router.get('/collection-summary', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const rows = await query(`
+      SELECT DATE(created_at) AS date,
+             SUM(CASE WHEN order_type = 'dine_in'  THEN total_amount ELSE 0 END) AS dine_in,
+             SUM(CASE WHEN order_type = 'delivery' THEN total_amount ELSE 0 END) AS delivery,
+             SUM(CASE WHEN order_type = 'direct'   THEN total_amount ELSE 0 END) AS takeaway,
+             SUM(total_amount) AS daily_total
+      FROM orders WHERE status = 'done' ${df}
+      GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 90
+    `, v);
+
+    const [totals] = await query(`
+      SELECT SUM(CASE WHEN order_type = 'dine_in'  THEN total_amount ELSE 0 END) AS dine_in,
+             SUM(CASE WHEN order_type = 'delivery' THEN total_amount ELSE 0 END) AS delivery,
+             SUM(CASE WHEN order_type = 'direct'   THEN total_amount ELSE 0 END) AS takeaway,
+             SUM(total_amount) AS grand_total
+      FROM orders WHERE status = 'done' ${df}
+    `, v);
+
+    res.json({ rows, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Payment Collection (cash / card / bKash / Nagad per day) ──────
+router.get('/payment-collection', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df  = start_date && end_date ? 'AND DATE(p.created_at) BETWEEN ? AND ?' : '';
+    const v   = start_date && end_date ? [start_date, end_date] : [];
+    const df2 = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+
+    const rows = await query(`
+      SELECT DATE(p.created_at) AS date,
+             SUM(CASE WHEN p.payment_method = 'cash'  THEN p.amount ELSE 0 END) AS cash,
+             SUM(CASE WHEN p.payment_method = 'card'  THEN p.amount ELSE 0 END) AS card,
+             SUM(CASE WHEN p.payment_method = 'bkash' THEN p.amount ELSE 0 END) AS bkash,
+             SUM(CASE WHEN p.payment_method = 'nagad' THEN p.amount ELSE 0 END) AS nagad,
+             SUM(p.amount) AS daily_total
+      FROM payments p WHERE p.status = 'completed' ${df}
+      GROUP BY DATE(p.created_at) ORDER BY date DESC LIMIT 90
+    `, v);
+
+    const [totals] = await query(`
+      SELECT SUM(CASE WHEN payment_method = 'cash'  THEN amount ELSE 0 END) AS cash,
+             SUM(CASE WHEN payment_method = 'card'  THEN amount ELSE 0 END) AS card,
+             SUM(CASE WHEN payment_method = 'bkash' THEN amount ELSE 0 END) AS bkash,
+             SUM(CASE WHEN payment_method = 'nagad' THEN amount ELSE 0 END) AS nagad,
+             SUM(amount) AS grand_total
+      FROM payments WHERE status = 'completed' ${df}
+    `, v);
+
+    const due = await query(`
+      SELECT DATE(o.created_at) AS date, SUM(dd.due_amount) AS due_total
+      FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
+      WHERE dd.due_amount > 0 AND o.status = 'done' ${df2}
+      GROUP BY DATE(o.created_at) ORDER BY date DESC LIMIT 90
+    `, v);
+
+    res.json({ rows, totals, due_by_date: due });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Yearly Sales Summary ──────────────────────────────────────────
+router.get('/yearly-summary', async (req, res) => {
+  try {
+    const { year = new Date().getFullYear() } = req.query;
+
+    const current = await query(`
+      SELECT DATE_FORMAT(created_at, '%Y-%m') AS month,
+             COUNT(*)             AS orders,
+             SUM(total_amount)    AS revenue,
+             SUM(vat_amount)      AS vat,
+             SUM(discount_amount) AS discount
+      FROM orders WHERE status = 'done' AND YEAR(created_at) = ?
+      GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month
+    `, [parseInt(year)]);
+
+    const previous = await query(`
+      SELECT DATE_FORMAT(created_at, '%Y-%m') AS month,
+             SUM(total_amount) AS revenue
+      FROM orders WHERE status = 'done' AND YEAR(created_at) = ?
+      GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month
+    `, [parseInt(year) - 1]);
+
+    res.json({ current_year: current, previous_year: previous, year: parseInt(year) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Due Collection ────────────────────────────────────────────────
+router.get('/due-collection', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const orders = await query(`
+      SELECT o.order_number, o.customer_name, dd.delivery_phone,
+             o.total_amount, dd.advance_payment, dd.due_amount,
+             dd.delivery_status, o.created_at
+      FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
+      WHERE dd.due_amount > 0 ${df}
+      ORDER BY dd.due_amount DESC LIMIT 200
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*) AS count,
+             SUM(dd.due_amount)      AS total_due,
+             SUM(dd.advance_payment) AS total_advance
+      FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
+      WHERE dd.due_amount > 0 ${df}
+    `, v);
+
+    res.json({ orders, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Menu List ─────────────────────────────────────────────────────
+router.get('/menu-list', async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT fc.name AS category, fi.name, fi.price, fi.promotional_price,
+             fi.is_available, fi.preparation_time, fi.vat_rate
+      FROM food_items fi JOIN food_categories fc ON fi.category_id = fc.id
+      WHERE fc.is_active = 1
+      ORDER BY fc.display_order ASC, fi.display_order ASC, fi.name ASC
+    `);
+
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.category]) grouped[r.category] = [];
+      grouped[r.category].push(r);
+    });
+
+    res.json({ menu: grouped, total_items: rows.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Hold/Due Report ───────────────────────────────────────────────
+router.get('/hold-report', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.order_type, o.customer_name,
+             o.customer_phone, o.total_amount, o.status,
+             o.created_at, o.updated_at,
+             u.full_name AS waiter_name, t.table_number
+      FROM orders o
+      LEFT JOIN users u ON o.waiter_id = u.id
+      LEFT JOIN tables t ON o.table_id = t.id
+      WHERE o.status = 'hold' ${df}
+      ORDER BY o.updated_at DESC
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*) AS count, SUM(total_amount) AS total_value
+      FROM orders WHERE status = 'hold' ${df}
+    `, v);
+
+    res.json({ orders, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Reservations Report ───────────────────────────────────────────
+router.get('/reservations-report', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(r.reservation_date) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const reservations = await query(`
+      SELECT r.id, r.customer_name, r.customer_phone, r.party_size,
+             r.reservation_date, r.reservation_time, r.status,
+             r.special_requests, r.created_at, t.table_number
+      FROM reservations r LEFT JOIN tables t ON r.table_id = t.id
+      WHERE 1=1 ${df}
+      ORDER BY r.reservation_date DESC, r.reservation_time DESC LIMIT 200
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN status = 'confirmed'  THEN 1 ELSE 0 END) AS confirmed,
+             SUM(CASE WHEN status = 'completed'  THEN 1 ELSE 0 END) AS completed,
+             SUM(CASE WHEN status = 'cancelled'  THEN 1 ELSE 0 END) AS cancelled,
+             SUM(party_size) AS total_covers
+      FROM reservations WHERE 1=1 ${df}
+    `, v);
+
+    res.json({ reservations, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Customer Search Report ────────────────────────────────────────
+router.get('/customer-search', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date, phone, name } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    if (phone) v.push(`%${phone}%`);
+    if (name)  v.push(`%${name}%`);
+
+    const customerFilter =
+      (phone ? 'AND o.customer_phone LIKE ?' : '') +
+      (name  ? 'AND o.customer_name  LIKE ?' : '');
+
+    const customers = await query(`
+      SELECT o.customer_name, o.customer_phone,
+             COUNT(o.id)              AS total_orders,
+             SUM(o.total_amount)      AS total_spent,
+             SUM(o.discount_amount)   AS total_discount,
+             MAX(o.created_at)        AS last_order,
+             COALESCE(SUM(dd.due_amount), 0) AS total_due
+      FROM orders o
+      LEFT JOIN delivery_details dd ON dd.order_id = o.id
+      WHERE o.status IN ('done') ${df} ${customerFilter}
+      GROUP BY o.customer_name, o.customer_phone
+      ORDER BY total_spent DESC LIMIT 200
+    `, v);
+
+    res.json({ customers });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Takeaway Report ───────────────────────────────────────────────
+router.get('/takeaway-report', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const v  = start_date && end_date ? [start_date, end_date] : [];
+
+    const orders = await query(`
+      SELECT o.order_number, o.customer_name, o.customer_phone,
+             o.total_amount, o.vat_amount, o.discount_amount,
+             o.status, o.created_at,
+             p.payment_method, p.amount AS paid_amount,
+             u.full_name AS waiter_name
+      FROM orders o
+      LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
+      LEFT JOIN users u ON o.waiter_id = u.id
+      WHERE o.order_type = 'direct' ${df}
+      ORDER BY o.created_at DESC LIMIT 200
+    `, v);
+
+    const [totals] = await query(`
+      SELECT COUNT(*) AS orders,
+             SUM(total_amount)    AS revenue,
+             SUM(vat_amount)      AS vat,
+             SUM(discount_amount) AS discount
+      FROM orders WHERE order_type = 'direct' ${df}
+    `, v);
+
+    res.json({ orders, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Daily Sales Detail (order-by-order with items) ────────────────
+router.get('/daily-sales-detail', validateDateRange, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const today = new Date().toISOString().split('T')[0];
+    const from = start_date || today;
+    const to   = end_date   || today;
+
+    const orders = await query(`
+      SELECT o.id, o.order_number, o.order_type, o.customer_name,
+             o.subtotal, o.vat_amount, o.service_charge,
+             o.discount_amount, o.total_amount, o.created_at,
+             u.full_name AS waiter_name,
+             p.payment_method, p.amount AS paid_amount
+      FROM orders o
+      LEFT JOIN users u  ON o.waiter_id = u.id
+      LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
+      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ?
+      ORDER BY o.created_at DESC LIMIT 300
+    `, [from, to]);
+
+    // Attach items
+    for (const ord of orders) {
+      ord.items = await query(`
+        SELECT oi.quantity, oi.unit_price, oi.total_price,
+               fi.name AS item_name, fc.name AS category_name
+        FROM order_items oi
+        JOIN food_items fi     ON oi.food_item_id = fi.id
+        JOIN food_categories fc ON fi.category_id  = fc.id
+        WHERE oi.order_id = ?
+      `, [ord.id]);
+    }
+
+    const [totals] = await query(`
+      SELECT COUNT(*)          AS total_orders,
+             SUM(total_amount) AS total_revenue,
+             SUM(vat_amount)   AS total_vat,
+             SUM(discount_amount) AS total_discount
+      FROM orders WHERE status = 'done' AND DATE(created_at) BETWEEN ? AND ?
+    `, [from, to]);
+
+    res.json({ orders, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
