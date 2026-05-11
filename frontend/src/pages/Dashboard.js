@@ -28,7 +28,11 @@ const Dashboard = () => {
   const [tab, setTab] = useState('overview');
   const [drill, setDrill] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null);
+  const [showRevenueModal, setShowRevenueModal] = useState(false);
+  const [revenuePeriod, setRevenuePeriod] = useState('today');
+  const [revenueViewOrder, setRevenueViewOrder] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [donutDetail, setDonutDetail] = useState(null); // null | 'qty' | 'revenue'
 
   const { data: viewingOrderDetail } = useQuery(
     ['dash-order-detail', viewingOrder],
@@ -151,6 +155,33 @@ const Dashboard = () => {
     { enabled: !!drill }
   );
 
+  const { data: revenueOrders } = useQuery(
+    ['dash-revenue-orders', revenuePeriod, showRevenueModal],
+    async () => {
+      const now = new Date();
+      let start, end;
+      if (revenuePeriod === 'today') {
+        start = end = now.toISOString().split('T')[0];
+      } else if (revenuePeriod === 'yesterday') {
+        const y = new Date(now); y.setDate(y.getDate() - 1);
+        start = end = y.toISOString().split('T')[0];
+      } else {
+        const w = new Date(now); w.setDate(w.getDate() - 6);
+        start = w.toISOString().split('T')[0];
+        end = now.toISOString().split('T')[0];
+      }
+      const response = await api.get('/orders', { params: { status: 'done', start_date: start, end_date: end, limit: 200 } });
+      return response.data;
+    },
+    { enabled: showRevenueModal }
+  );
+
+  const { data: revenueOrderDetail } = useQuery(
+    ['dash-rev-order-detail', revenueViewOrder],
+    () => api.get(`/orders/${revenueViewOrder}`).then(r => r.data),
+    { enabled: !!revenueViewOrder }
+  );
+
   const { data: receiptData } = useQuery(
     ['dash-receipts', user?.role],
     async () => {
@@ -221,6 +252,11 @@ const Dashboard = () => {
     sold: parseInt(cat.total_quantity || 0, 10),
   }));
 
+  const allItems = menuPerfData?.item_performance || [];
+  const donutTotalQty  = allItems.reduce((s, i) => s + parseInt(i.total_quantity || 0), 0);
+  const donutTotalRev  = allItems.reduce((s, i) => s + parseFloat(i.total_revenue || 0), 0);
+  const donutAvgPrice  = allItems.length ? allItems.reduce((s, i) => s + parseFloat(i.avg_unit_price || 0), 0) / allItems.length : 0;
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
@@ -248,14 +284,16 @@ const Dashboard = () => {
 
       {/* ── Stats Grid ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Today's Revenue"
-          value={`৳${(todayStats.today_revenue || 0).toLocaleString()}`}
-          icon={CurrencyDollarIcon}
-          trend={revenueTrend}
-          trendLabel="vs yesterday"
-          color="sky"
-        />
+        <div className="cursor-pointer" onClick={() => setShowRevenueModal(true)}>
+          <StatCard
+            title="Today's Revenue ↗"
+            value={`৳${(todayStats.today_revenue || 0).toLocaleString()}`}
+            icon={CurrencyDollarIcon}
+            trend={revenueTrend}
+            trendLabel="vs yesterday"
+            color="sky"
+          />
+        </div>
         <StatCard
           title="Today's Orders"
           value={todayStats.today_orders || 0}
@@ -376,6 +414,134 @@ const Dashboard = () => {
                 <div className="text-xs text-slate-500 mt-1">Status: <span className="capitalize font-medium">{o.status}</span> · ৳{parseFloat(o.total_amount || 0).toFixed(0)} {o.cancellation_reason ? `| ${o.cancellation_reason}` : ''}</div>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Items Sold Donut Stats Card ── */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-800">Items Sold — Last 7 Days</h3>
+            <p className="text-xs text-slate-400">Click a stat to see full breakdown</p>
+          </div>
+        </div>
+        <div className="flex items-start justify-around">
+          {/* Total Qty Sold */}
+          <div className="flex flex-col items-center gap-1 cursor-pointer group" onClick={() => setDonutDetail('qty')}>
+            <div className="relative" style={{ width: 90, height: 90 }}>
+              <svg width="90" height="90" viewBox="0 0 90 90">
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#e5e7eb" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78} ${2*Math.PI*36*0.22}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#f97316" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78*0.62} ${2*Math.PI*36*(1-0.78*0.62)}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx={45 + 36 * Math.cos((129 * Math.PI) / 180)}
+                        cy={45 + 36 * Math.sin((129 * Math.PI) / 180)}
+                        r="4" fill="#f97316" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[11px] font-black text-gray-800 leading-tight text-center px-1">{donutTotalQty}</span>
+              </div>
+            </div>
+            <p className="text-[11px] font-semibold text-blue-600 underline decoration-dotted text-center leading-tight group-hover:text-blue-800">Total Qty Sold</p>
+          </div>
+          <div className="w-px bg-gray-100 self-stretch" />
+          {/* Net Sales */}
+          <div className="flex flex-col items-center gap-1 cursor-pointer group" onClick={() => setDonutDetail('revenue')}>
+            <div className="relative" style={{ width: 90, height: 90 }}>
+              <svg width="90" height="90" viewBox="0 0 90 90">
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#e5e7eb" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78} ${2*Math.PI*36*0.22}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#22c55e" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78*0.62} ${2*Math.PI*36*(1-0.78*0.62)}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx={45 + 36 * Math.cos((129 * Math.PI) / 180)}
+                        cy={45 + 36 * Math.sin((129 * Math.PI) / 180)}
+                        r="4" fill="#22c55e" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[11px] font-black text-gray-800 leading-tight text-center px-1">৳{Math.round(donutTotalRev).toLocaleString()}</span>
+              </div>
+            </div>
+            <p className="text-[11px] font-semibold text-blue-600 underline decoration-dotted text-center leading-tight group-hover:text-blue-800">Net Sales</p>
+          </div>
+          <div className="w-px bg-gray-100 self-stretch" />
+          {/* Avg Item Price */}
+          <div className="flex flex-col items-center gap-1">
+            <div className="relative" style={{ width: 90, height: 90 }}>
+              <svg width="90" height="90" viewBox="0 0 90 90">
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#e5e7eb" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78} ${2*Math.PI*36*0.22}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx="45" cy="45" r="36" fill="none" stroke="#3b82f6" strokeWidth="5"
+                  strokeDasharray={`${2*Math.PI*36*0.78*0.62} ${2*Math.PI*36*(1-0.78*0.62)}`} strokeLinecap="round"
+                  transform="rotate(129 45 45)" />
+                <circle cx={45 + 36 * Math.cos((129 * Math.PI) / 180)}
+                        cy={45 + 36 * Math.sin((129 * Math.PI) / 180)}
+                        r="4" fill="#3b82f6" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[11px] font-black text-gray-800 leading-tight text-center px-1">৳{Math.round(donutAvgPrice).toLocaleString()}</span>
+              </div>
+            </div>
+            <p className="text-[11px] font-semibold text-gray-600 text-center leading-tight">Avg Item Price</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Detail modal */}
+      {donutDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDonutDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div>
+                <h3 className="font-bold text-gray-900 text-base">
+                  {donutDetail === 'qty' ? 'Total Qty Sold — Item Breakdown' : 'Net Sales — Item Breakdown'}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">Last 7 days</p>
+              </div>
+              <button onClick={() => setDonutDetail(null)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-4 py-3">
+              {[...allItems]
+                .sort((a, b) =>
+                  donutDetail === 'qty'
+                    ? parseInt(b.total_quantity || 0) - parseInt(a.total_quantity || 0)
+                    : parseFloat(b.total_revenue || 0) - parseFloat(a.total_revenue || 0)
+                )
+                .map((item, i) => {
+                  const maxVal = donutDetail === 'qty' ? donutTotalQty : donutTotalRev;
+                  const val = donutDetail === 'qty' ? parseInt(item.total_quantity || 0) : parseFloat(item.total_revenue || 0);
+                  const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                  return (
+                    <div key={item.id || i} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                      <span className="text-xs text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-semibold text-gray-800 truncate">{item.item_name}</span>
+                          <span className="text-sm font-black text-gray-900 ml-2 shrink-0">
+                            {donutDetail === 'qty' ? val : `৳${val.toFixed(2)}`}
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-1.5">
+                          <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: donutDetail === 'qty' ? '#f97316' : '#22c55e' }} />
+                        </div>
+                        <span className="text-[10px] text-gray-400">{item.category_name} · {pct.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  );
+                })
+              }
+            </div>
+            <div className="px-5 py-3 border-t bg-gray-50 rounded-b-2xl flex justify-between text-xs text-gray-500">
+              <span>{allItems.length} items</span>
+              <span className="font-bold text-gray-800">
+                Total: {donutDetail === 'qty' ? donutTotalQty : `৳${donutTotalRev.toFixed(2)}`}
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -546,6 +712,86 @@ const Dashboard = () => {
                 <div className="text-sm text-center text-slate-400">Category: <span className="font-semibold text-slate-600">{selectedItem.category}</span></div>
               )}
               <button onClick={() => { setSelectedItem(null); navigate('/reports'); }} className="w-full btn btn-secondary btn-sm mt-1">View Full Report</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Revenue Drill-Down Modal ── */}
+      {showRevenueModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setShowRevenueModal(false); setRevenueViewOrder(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-base font-black text-slate-800">Revenue — Done Orders</h2>
+              <button onClick={() => { setShowRevenueModal(false); setRevenueViewOrder(null); }} className="p-1.5 rounded-full hover:bg-slate-100 transition-colors">
+                <XMarkIcon className="h-5 w-5 text-slate-500" />
+              </button>
+            </div>
+            {/* Period Tabs */}
+            <div className="flex gap-1 px-6 pt-4">
+              {[['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Last 7 Days']].map(([val, label]) => (
+                <button key={val} onClick={() => { setRevenuePeriod(val); setRevenueViewOrder(null); }}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${revenuePeriod === val ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="px-6 pb-6 mt-4 overflow-y-auto flex-1">
+              {revenueViewOrder ? (
+                <div>
+                  <button onClick={() => setRevenueViewOrder(null)} className="text-xs text-sky-600 font-bold mb-3 hover:underline">← Back to list</button>
+                  {!revenueOrderDetail ? (
+                    <div className="flex justify-center py-10"><LoadingSpinner /></div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div><span className="text-slate-400 text-xs block">Order #</span><span className="font-mono font-black">{revenueOrderDetail.order?.order_number}</span></div>
+                        <div><span className="text-slate-400 text-xs block">Total</span><span className="font-bold text-sky-600">৳{parseFloat(revenueOrderDetail.order?.total_amount || 0).toFixed(2)}</span></div>
+                        <div><span className="text-slate-400 text-xs block">Type</span><span className="font-semibold capitalize">{revenueOrderDetail.order?.order_type === 'direct' ? 'Takeaway' : revenueOrderDetail.order?.order_type}</span></div>
+                        <div><span className="text-slate-400 text-xs block">Table</span><span className="font-semibold">{revenueOrderDetail.order?.table_number || '—'}</span></div>
+                        {revenueOrderDetail.order?.customer_name && (
+                          <div><span className="text-slate-400 text-xs block">Customer</span><span className="font-semibold">{revenueOrderDetail.order.customer_name}</span></div>
+                        )}
+                        <div><span className="text-slate-400 text-xs block">Placed At</span><span className="font-semibold">{revenueOrderDetail.order?.created_at ? new Date(revenueOrderDetail.order.created_at).toLocaleString() : '—'}</span></div>
+                      </div>
+                      {(revenueOrderDetail.items || []).length > 0 && (
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Items</p>
+                          <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                            {revenueOrderDetail.items.map((item, i) => (
+                              <div key={i} className="flex justify-between px-3 py-2 text-sm">
+                                <span>{item.quantity}× {item.menu_item_name || item.name}</span>
+                                <span className="font-semibold">৳{parseFloat(item.subtotal || item.unit_price * item.quantity).toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : !revenueOrders ? (
+                <div className="flex justify-center py-10"><LoadingSpinner /></div>
+              ) : (revenueOrders.orders || []).length === 0 ? (
+                <p className="text-slate-400 text-sm text-center py-10">No done orders for this period</p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400 font-semibold mb-3">{(revenueOrders.orders || []).length} done orders · ৳{(revenueOrders.orders || []).reduce((s, o) => s + parseFloat(o.total_amount || 0), 0).toFixed(0)} total</p>
+                  {(revenueOrders.orders || []).map(order => (
+                    <button key={order.id} onClick={() => setRevenueViewOrder(order.id)}
+                      className="w-full text-left card p-3 hover:bg-sky-50 hover:border-sky-200 transition-colors border border-transparent">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <span className="font-mono font-black text-slate-700 text-sm">{order.order_number}</span>
+                          {order.customer_name && <span className="ml-2 text-xs text-slate-500">{order.customer_name}</span>}
+                          <div className="text-xs text-slate-400 mt-0.5">{new Date(order.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+                        </div>
+                        <span className="font-bold text-sky-600 text-sm">৳{parseFloat(order.total_amount || 0).toFixed(0)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

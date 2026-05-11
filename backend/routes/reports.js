@@ -842,6 +842,7 @@ router.get('/discount-report', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
     const v  = start_date && end_date ? [start_date, end_date] : [];
 
     const byUser = await query(`
@@ -857,11 +858,11 @@ router.get('/discount-report', validateDateRange, async (req, res) => {
     const [totals] = await query(`
       SELECT COUNT(*)                AS orders_with_discount,
              SUM(discount_amount)    AS total_discount
-      FROM orders WHERE status = 'done' AND discount_amount > 0 ${df}
+      FROM orders WHERE status = 'done' AND discount_amount > 0 ${dfu}
     `, v);
 
     const orders = await query(`
-      SELECT o.order_number, o.customer_name, o.order_type, o.total_amount,
+      SELECT o.id, o.order_number, o.customer_name, o.order_type, o.total_amount,
              o.discount_amount, o.created_at, u.full_name AS waiter_name
       FROM orders o JOIN users u ON o.waiter_id = u.id
       WHERE o.status = 'done' AND o.discount_amount > 0 ${df}
@@ -932,6 +933,7 @@ router.get('/payment-collection', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const df  = start_date && end_date ? 'AND DATE(p.created_at) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
     const v   = start_date && end_date ? [start_date, end_date] : [];
     const df2 = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
 
@@ -952,7 +954,7 @@ router.get('/payment-collection', validateDateRange, async (req, res) => {
              SUM(CASE WHEN payment_method = 'bkash' THEN amount ELSE 0 END) AS bkash,
              SUM(CASE WHEN payment_method = 'nagad' THEN amount ELSE 0 END) AS nagad,
              SUM(amount) AS grand_total
-      FROM payments WHERE status = 'completed' ${df}
+      FROM payments WHERE status = 'completed' ${dfu}
     `, v);
 
     const due = await query(`
@@ -1000,7 +1002,7 @@ router.get('/due-collection', validateDateRange, async (req, res) => {
     const v  = start_date && end_date ? [start_date, end_date] : [];
 
     const orders = await query(`
-      SELECT o.order_number, o.customer_name, dd.delivery_phone,
+      SELECT o.id, o.order_number, o.customer_name, dd.delivery_phone,
              o.total_amount, dd.advance_payment, dd.due_amount,
              dd.delivery_status, o.created_at
       FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
@@ -1046,6 +1048,7 @@ router.get('/hold-report', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
     const v  = start_date && end_date ? [start_date, end_date] : [];
 
     const orders = await query(`
@@ -1062,7 +1065,7 @@ router.get('/hold-report', validateDateRange, async (req, res) => {
 
     const [totals] = await query(`
       SELECT COUNT(*) AS count, SUM(total_amount) AS total_value
-      FROM orders WHERE status = 'hold' ${df}
+      FROM orders WHERE status = 'hold' ${dfu}
     `, v);
 
     res.json({ orders, totals });
@@ -1134,7 +1137,8 @@ router.get('/customer-search', validateDateRange, async (req, res) => {
 router.get('/takeaway-report', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    const df = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const df  = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
     const v  = start_date && end_date ? [start_date, end_date] : [];
 
     const orders = await query(`
@@ -1155,7 +1159,7 @@ router.get('/takeaway-report', validateDateRange, async (req, res) => {
              SUM(total_amount)    AS revenue,
              SUM(vat_amount)      AS vat,
              SUM(discount_amount) AS discount
-      FROM orders WHERE order_type = 'direct' ${df}
+      FROM orders WHERE order_type = 'direct' ${dfu}
     `, v);
 
     res.json({ orders, totals });

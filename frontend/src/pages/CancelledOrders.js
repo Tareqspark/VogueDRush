@@ -1,12 +1,59 @@
 import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import {
-  XCircleIcon, CalendarIcon, MagnifyingGlassIcon, ClockIcon,
+  XCircleIcon, CalendarIcon, MagnifyingGlassIcon, ClockIcon, PrinterIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 
 const TYPE_LABELS = { dine_in: 'Dine In', delivery: 'Delivery', direct: 'Takeaway' };
+
+function printCancellationReceipt(order) {
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Cancellation Receipt — ${order.order_number}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Courier New', monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 16px; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 8px 0; }
+    .row { display: flex; justify-content: space-between; margin: 2px 0; }
+    .cancelled-banner { background: #000; color: #fff; text-align: center; padding: 4px; font-weight: bold; font-size: 13px; margin: 8px 0; letter-spacing: 2px; }
+    .reason-box { border: 2px solid #000; padding: 8px; margin-top: 10px; }
+    .reason-label { font-weight: bold; font-size: 11px; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="center bold" style="font-size:15px;">CANCELLATION RECEIPT</div>
+  <div class="centre" style="font-size:11px;text-align:center;">Order ${order.order_number}</div>
+  <div class="divider"></div>
+  <div class="row"><span>Date</span><span>${new Date(order.created_at).toLocaleString()}</span></div>
+  <div class="row"><span>Type</span><span>${TYPE_LABELS[order.order_type] || order.order_type}</span></div>
+  ${order.table_number ? `<div class="row"><span>Table</span><span>${order.table_number}</span></div>` : ''}
+  ${order.customer_name ? `<div class="row"><span>Customer</span><span>${order.customer_name}</span></div>` : ''}
+  ${order.customer_phone ? `<div class="row"><span>Phone</span><span>${order.customer_phone}</span></div>` : ''}
+  <div class="row"><span>Staff</span><span>${order.waiter_full_name || '—'}</span></div>
+  <div class="divider"></div>
+  <div class="row bold"><span>Order Value</span><span>৳${parseFloat(order.total_amount || 0).toFixed(2)}</span></div>
+  <div class="cancelled-banner">★ CANCELLED ★</div>
+  ${order.cancellation_reason ? `
+  <div class="reason-box">
+    <div class="reason-label">Cancellation Reason:</div>
+    <div>${order.cancellation_reason}</div>
+  </div>` : ''}
+  <div class="divider" style="margin-top:16px;"></div>
+  <div class="center" style="font-size:10px;margin-top:4px;">Printed: ${new Date().toLocaleString()}</div>
+</body>
+</html>`;
+  const win = window.open('', '_blank', 'width=400,height=600');
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); win.close(); }, 300);
+}
 
 export default function CancelledOrders() {
   const { api } = useAuth();
@@ -124,6 +171,13 @@ export default function CancelledOrders() {
                 <div className="text-right">
                   <p className="text-xl font-black text-slate-800">৳{parseFloat(order.total_amount).toFixed(0)}</p>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200 font-semibold">Cancelled</span>
+                  <div className="mt-2">
+                    <button
+                      onClick={() => printCancellationReceipt(order)}
+                      className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded-lg border border-slate-200 hover:border-rose-200 transition-colors ml-auto">
+                      <PrinterIcon className="h-3.5 w-3.5" /> Print
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

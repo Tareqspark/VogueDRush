@@ -89,8 +89,7 @@ export default function Menu() {
                     </div>
                     {item.description && <div className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</div>}
                     <div className="flex items-center gap-3 mt-1">
-                      <span className="text-sky-600 font-bold">৳{parseFloat(item.promotional_price || item.price).toFixed(2)}</span>
-                      {item.promotional_price && <span className="text-slate-400 text-sm line-through">৳{parseFloat(item.price).toFixed(2)}</span>}
+                      <span className="text-sky-600 font-bold">৳{parseFloat(item.price).toFixed(2)}</span>
                       <span className="text-xs text-slate-400">Prep: {item.preparation_time}m</span>
                     </div>
                   </div>
@@ -154,7 +153,6 @@ function ItemModal({ api, categories, item, onClose, onSaved }) {
     name: item?.name || '',
     description: item?.description || '',
     price: item?.price || '',
-    promotional_price: item?.promotional_price || '',
     vat_rate: item?.vat_rate || 0,
     preparation_time: item?.preparation_time || 15,
     display_order: item?.display_order || 0,
@@ -165,10 +163,7 @@ function ItemModal({ api, categories, item, onClose, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        promotional_price: form.promotional_price === '' ? undefined : form.promotional_price,
-      };
+      const payload = { ...form };
       if (item) {
         await api.put(`/menu/items/${item.id}`, payload);
         toast.success('Item updated');
@@ -202,9 +197,8 @@ function ItemModal({ api, categories, item, onClose, onSaved }) {
           </div>
           <div><label className="label">Name *</label><input className="input" required {...f('name')} /></div>
           <div><label className="label">Description</label><textarea className="textarea h-20" {...f('description')} /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Price (৳) *</label><input className="input" type="number" step="0.01" min="0" required {...f('price')} /></div>
-            <div><label className="label">Promo Price (৳)</label><input className="input" type="number" step="0.01" min="0" {...f('promotional_price')} /></div>
+          <div>
+            <label className="label">Price (৳) *</label><input className="input" type="number" step="0.01" min="0" required {...f('price')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="label">VAT Rate (%)</label><input className="input" type="number" step="0.01" min="0" {...f('vat_rate')} /></div>

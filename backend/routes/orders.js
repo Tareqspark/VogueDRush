@@ -1079,7 +1079,7 @@ router.put('/:id/items', validateId, async (req, res) => {
 router.post('/:id/bill', validateId, async (req, res) => {
   try {
     const { id } = req.params;
-    const { discount_amount = 0, payment_method = 'cash', payment_last4 } = req.body || {};
+    const { discount_amount = 0, payment_method = 'cash', payment_last4, service_charge_percentage, service_charge_override } = req.body || {};
 
     const validMethods = ['cash', 'card', 'bkash', 'nagad'];
     if (!validMethods.includes(payment_method)) {
@@ -1104,7 +1104,19 @@ router.post('/:id/bill', validateId, async (req, res) => {
     }
 
     const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
-    const baseTotal = parseFloat(order.subtotal) + parseFloat(order.vat_amount) + parseFloat(order.service_charge);
+
+    // Allow service charge override from the bill popup
+    let finalServiceCharge = parseFloat(order.service_charge) || 0;
+    if (service_charge_override !== undefined && service_charge_override !== null) {
+      // Named preset: fixed amount already computed on frontend
+      finalServiceCharge = Math.max(0, parseFloat(service_charge_override) || 0);
+    } else if (service_charge_percentage !== undefined && service_charge_percentage !== null) {
+      // Legacy percentage-based override
+      const pct = Math.max(0, parseFloat(service_charge_percentage) || 0);
+      finalServiceCharge = (parseFloat(order.subtotal) * pct) / 100;
+    }
+
+    const baseTotal = parseFloat(order.subtotal) + parseFloat(order.vat_amount) + finalServiceCharge;
     const adjustedTotal = Math.max(0, baseTotal - safeDiscount);
 
     // Mark bill printed
@@ -1112,6 +1124,7 @@ router.post('/:id/bill', validateId, async (req, res) => {
       bill_printed: true,
       bill_printed_at: new Date(),
       discount_amount: safeDiscount,
+      service_charge: finalServiceCharge,
       total_amount: adjustedTotal,
       status: 'done',
       updated_at: new Date()
@@ -1166,6 +1179,7 @@ router.post('/:id/bill', validateId, async (req, res) => {
         name: settingsMap.restaurant_name || 'FoodPark',
         address: settingsMap.restaurant_address || '',
         phone: settingsMap.restaurant_phone || '',
+        vat_number: settingsMap.restaurant_vat_number || '',
         currency: settingsMap.currency_symbol || '৳',
         vat_percentage: settingsMap.vat_percentage || '15',
         service_charge_percentage: settingsMap.service_charge_percentage || '10',

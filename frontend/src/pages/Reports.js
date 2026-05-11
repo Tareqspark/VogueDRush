@@ -92,6 +92,100 @@ function EmptyState({ msg = 'No data for this period.' }) {
   return <div className="py-16 text-center text-gray-400"><p className="font-medium">{msg}</p></div>;
 }
 
+// ─── Order Detail Modal (shared across reports) ───────────────────
+function OrderDetailModal({ detail, isFetching, onClose }) {
+  const order    = detail?.order;
+  const items    = detail?.items    || [];
+  const payments = detail?.payments || [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-black text-gray-900">
+            Order Detail {order ? `— ${order.order_number}` : ''}
+          </h2>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 font-bold text-lg transition-colors">✕</button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto flex-1">
+          {isFetching && !order ? (
+            <div className="flex justify-center py-10"><LoadingSpinner /></div>
+          ) : !order ? (
+            <p className="text-gray-400 text-sm text-center py-10">Order not found.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><span className="text-gray-400 text-xs block">Order No</span><span className="font-mono font-black text-gray-800">{order.order_number}</span></div>
+                <div><span className="text-gray-400 text-xs block">Status</span><span className={`inline-block px-2 py-0.5 rounded text-xs font-bold capitalize ${order.status === 'done' ? 'bg-green-100 text-green-800' : order.status === 'cancelled' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700'}`}>{order.status}</span></div>
+                <div><span className="text-gray-400 text-xs block">Type</span><span className="font-semibold capitalize text-gray-700">{order.order_type === 'direct' ? 'Takeaway' : (order.order_type || '').replace('_', ' ')}</span></div>
+                <div><span className="text-gray-400 text-xs block">Total</span><span className="font-bold text-sky-600">৳{parseFloat(order.total_amount || 0).toFixed(2)}</span></div>
+                {order.table_number && <div><span className="text-gray-400 text-xs block">Table</span><span className="font-semibold text-gray-700">{order.table_number}</span></div>}
+                {order.customer_name && <div><span className="text-gray-400 text-xs block">Customer</span><span className="font-semibold text-gray-700">{order.customer_name}</span></div>}
+                {order.customer_phone && <div><span className="text-gray-400 text-xs block">Phone</span><span className="font-semibold text-gray-700">{order.customer_phone}</span></div>}
+                <div className="col-span-2"><span className="text-gray-400 text-xs block">Placed At</span><span className="font-semibold text-gray-700">{order.created_at ? new Date(order.created_at).toLocaleString() : '—'}</span></div>
+                {parseFloat(order.discount_amount) > 0 && <div><span className="text-gray-400 text-xs block">Discount</span><span className="font-semibold text-red-600">-৳{parseFloat(order.discount_amount).toFixed(2)}</span></div>}
+                {parseFloat(order.vat_amount) > 0 && <div><span className="text-gray-400 text-xs block">VAT</span><span className="font-semibold text-gray-700">৳{parseFloat(order.vat_amount).toFixed(2)}</span></div>}
+                {order.cancellation_reason && (
+                  <div className="col-span-2 rounded-lg bg-rose-50 border border-rose-100 px-3 py-2 text-sm text-rose-700">
+                    <span className="font-bold">Cancel Reason: </span>{order.cancellation_reason}
+                  </div>
+                )}
+              </div>
+              {items.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Items</p>
+                  <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl text-sm">
+                    {items.map((item, i) => (
+                      <div key={i} className="flex justify-between px-3 py-2">
+                        <span className="text-gray-700">{item.quantity}× {item.menu_item_name || item.item_name || item.name}</span>
+                        <span className="font-semibold text-gray-800">৳{parseFloat(item.subtotal || item.total_price || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {payments.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Payments</p>
+                  <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl text-sm">
+                    {payments.map((p, i) => (
+                      <div key={i} className="flex justify-between px-3 py-2">
+                        <span className="capitalize text-gray-700">{p.payment_method}</span>
+                        <span className="font-semibold text-gray-800">৳{parseFloat(p.amount).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useOrderModal(api) {
+  const [orderId, setOrderId] = useState(null);
+  const { data: detail, isFetching } = useQuery(
+    ['rpt-order-detail', orderId],
+    () => api.get(`/orders/${orderId}`).then(r => r.data),
+    { enabled: !!orderId }
+  );
+  const modal = orderId ? (
+    <OrderDetailModal detail={detail} isFetching={isFetching} onClose={() => setOrderId(null)} />
+  ) : null;
+  return [setOrderId, modal];
+}
+
+function OrderLink({ id, orderNumber, onClick }) {
+  return (
+    <button onClick={() => id && onClick(id)}
+      className={`font-mono font-black text-left leading-none ${id ? 'text-sky-600 hover:text-sky-800 hover:underline cursor-pointer' : 'text-gray-700 cursor-default'}`}>
+      {orderNumber}
+    </button>
+  );
+}
+
 // ─── A. Daily Sales Summary ──────────────────────────────────────
 function DailySalesSummary({ api }) {
   const today = new Date().toISOString().split('T')[0];
@@ -99,6 +193,7 @@ function DailySalesSummary({ api }) {
   const [end, setEnd]     = useState(today);
   const ref = useRef(null);
   const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [openOrder, orderModal] = useOrderModal(api);
 
   const { data, isLoading } = useQuery(
     ['rpt-daily-sales', start, end],
@@ -122,10 +217,10 @@ function DailySalesSummary({ api }) {
           <h2 className="text-base font-bold text-gray-900 mb-1">Daily Sales Summary Report</h2>
           <span className="sub text-xs text-gray-500 mb-3 block">{start} — {end}</span>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 no-print">
-            <SummaryCard label="Total Revenue"  value={`৳${fmt(t.revenue)}`}/>
-            <SummaryCard label="Total Orders"   value={t.total||0} color="text-blue-600"/>
-            <SummaryCard label="Total VAT"      value={`৳${fmt(t.vat)}`} color="text-amber-600"/>
-            <SummaryCard label="Total Discount" value={`৳${fmt(t.discount)}`} color="text-gray-600"/>
+            <SummaryCard label="Total Revenue"  value={`৳${fmt(t.total_revenue)}`}/>
+            <SummaryCard label="Total Orders"   value={t.total_orders||0} color="text-blue-600"/>
+            <SummaryCard label="Total VAT"      value={`৳${fmt(t.total_vat)}`} color="text-amber-600"/>
+            <SummaryCard label="Total Discount" value={`৳${fmt(t.total_discount)}`} color="text-gray-600"/>
           </div>
           {orders.length === 0 ? <EmptyState/> : (
             <div className="overflow-x-auto">
@@ -134,7 +229,7 @@ function DailySalesSummary({ api }) {
                 <tbody>
                   {orders.map(o => (
                     <tr key={o.id} className={T.rowHover}>
-                      <Td mono>{o.order_number}</Td>
+                      <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{TYPE_LABEL[o.order_type]||o.order_type}</span></Td>
                       <Td><span className={`${T.badge} ${PAY_BADGE[o.payment_method]||'bg-gray-100 text-gray-600'}`}>{o.payment_method||'—'}</span></Td>
@@ -149,15 +244,16 @@ function DailySalesSummary({ api }) {
                 <tfoot>
                   <SumRow>
                     <td colSpan={4} className="px-3 py-2 text-sm font-bold">GRAND TOTAL ({orders.length} orders)</td>
-                    <td className="px-3 py-2 text-sm font-black text-right">৳{fmt(t.revenue)}</td>
-                    <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.discount)}</td>
-                    <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.vat)}</td>
+                    <td className="px-3 py-2 text-sm font-black text-right">৳{fmt(t.total_revenue)}</td>
+                    <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.total_discount)}</td>
+                    <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.total_vat)}</td>
                     <td colSpan={2}/>
                   </SumRow>
                 </tfoot>
               </table>
             </div>
           )}
+        {orderModal}
         </div>
       )}
     </div>
@@ -171,6 +267,7 @@ function CancelReport({ api }) {
   const [end, setEnd]     = useState(today);
   const ref = useRef(null);
   const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [openOrder, orderModal] = useOrderModal(api);
 
   const { data, isLoading } = useQuery(
     ['rpt-cancel', start, end],
@@ -205,7 +302,7 @@ function CancelReport({ api }) {
                 <tbody>
                   {orders.map(o => (
                     <tr key={o.id} className="hover:bg-red-50">
-                      <Td mono>{o.order_number}</Td>
+                      <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{TYPE_LABEL[o.order_type]||o.order_type}</span></Td>
                       <Td><span className="text-red-700">{o.cancellation_reason||'—'}</span></Td>
@@ -225,6 +322,7 @@ function CancelReport({ api }) {
               </table>
             </div>
           )}
+          {orderModal}
         </div>
       )}
     </div>
@@ -238,6 +336,7 @@ function HoldDueReport({ api }) {
   const [end, setEnd]     = useState(today);
   const ref = useRef(null);
   const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [openOrder, orderModal] = useOrderModal(api);
 
   const { data, isLoading } = useQuery(
     ['rpt-hold', start, end],
@@ -270,7 +369,7 @@ function HoldDueReport({ api }) {
                 <tbody>
                   {orders.map(o => (
                     <tr key={o.id} className="hover:bg-orange-50">
-                      <Td mono>{o.order_number}</Td>
+                      <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{TYPE_LABEL[o.order_type]||o.order_type}</span></Td>
                       <Td>{o.table_number||'—'}</Td>
@@ -290,6 +389,7 @@ function HoldDueReport({ api }) {
               </table>
             </div>
           )}
+          {orderModal}
         </div>
       )}
     </div>
@@ -669,6 +769,7 @@ function DiscountReport({ api }) {
   const [view, setView]   = useState('by-user');
   const ref = useRef(null);
   const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [openOrder, orderModal] = useOrderModal(api);
 
   const { data, isLoading } = useQuery(
     ['rpt-discount', start, end],
@@ -734,7 +835,7 @@ function DiscountReport({ api }) {
                   <tbody>
                     {orders.map((o,i) => (
                       <tr key={i} className={T.rowHover}>
-                        <Td mono>{o.order_number}</Td>
+                        <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
                         <Td>{o.customer_name||'—'}</Td>
                         <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{TYPE_LABEL[o.order_type]||o.order_type}</span></Td>
                         <Td>{o.waiter_name}</Td>
@@ -748,6 +849,7 @@ function DiscountReport({ api }) {
               </div>
             )
           )}
+          {orderModal}
         </div>
       )}
     </div>
@@ -761,6 +863,7 @@ function DueCollectionReport({ api }) {
   const [end, setEnd]     = useState(today);
   const ref = useRef(null);
   const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [openOrder, orderModal] = useOrderModal(api);
 
   const { data, isLoading } = useQuery(
     ['rpt-due', start, end],
@@ -795,7 +898,7 @@ function DueCollectionReport({ api }) {
                 <tbody>
                   {orders.map((o,i) => (
                     <tr key={i} className="hover:bg-orange-50">
-                      <Td mono>{o.order_number}</Td>
+                      <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td mono>{o.delivery_phone||'—'}</Td>
                       <Td right>৳{fmt(o.total_amount)}</Td>
@@ -817,6 +920,7 @@ function DueCollectionReport({ api }) {
               </table>
             </div>
           )}
+          {orderModal}
         </div>
       )}
     </div>
@@ -1177,13 +1281,12 @@ function MenuListReport({ api }) {
             <div key={cat} className="mb-4">
               <div className="bg-gray-800 text-white px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-t-lg">{cat}</div>
               <table className="w-full text-sm border border-gray-200 rounded-b-lg overflow-hidden">
-                <thead><tr className="bg-gray-50"><Th>Item Name</Th><Th right>Price</Th><Th right>Promo Price</Th><Th right>VAT%</Th><Th right>Prep Time</Th><Th>Status</Th></tr></thead>
+                <thead><tr className="bg-gray-50"><Th>Item Name</Th><Th right>Price</Th><Th right>VAT%</Th><Th right>Prep Time</Th><Th>Status</Th></tr></thead>
                 <tbody>
                   {menu[cat].map((item,i) => (
                     <tr key={i} className={T.rowHover}>
                       <Td><span className="font-medium text-gray-900">{item.name}</span></Td>
                       <Td right>৳{fmt(item.price)}</Td>
-                      <Td right>{item.promotional_price ? <span className="text-red-600 font-bold">৳{fmt(item.promotional_price)}</span> : '—'}</Td>
                       <Td right>{item.vat_rate}%</Td>
                       <Td right>{item.preparation_time}m</Td>
                       <Td><span className={`${T.badge} ${item.is_available?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}`}>{item.is_available?'Available':'Off'}</span></Td>
@@ -1199,11 +1302,328 @@ function MenuListReport({ api }) {
   );
 }
 
+// ─── Donut Ring Stat (like screenshot) ───────────────────────────
+function DonutStat({ label, value, trend, color, onClick }) {
+  const r = 36;
+  const circ = 2 * Math.PI * r;
+  const arc = circ * 0.78; // 78% arc visible
+  return (
+    <div
+      className={`flex flex-col items-center gap-1 ${onClick ? 'cursor-pointer group' : ''}`}
+      onClick={onClick}
+      title={onClick ? `Click to view ${label} details` : undefined}
+    >
+      <div className="relative" style={{ width: 90, height: 90 }}>
+        <svg width="90" height="90" viewBox="0 0 90 90">
+          {/* bg arc */}
+          <circle cx="45" cy="45" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5"
+            strokeDasharray={`${arc} ${circ - arc}`} strokeLinecap="round"
+            transform="rotate(129 45 45)" />
+          {/* colored arc */}
+          <circle cx="45" cy="45" r={r} fill="none" stroke={color} strokeWidth="5"
+            strokeDasharray={`${arc * 0.62} ${circ - arc * 0.62}`} strokeLinecap="round"
+            transform="rotate(129 45 45)" />
+          {/* colored dot at start of arc */}
+          <circle cx={45 + r * Math.cos((129 * Math.PI) / 180)}
+                  cy={45 + r * Math.sin((129 * Math.PI) / 180)}
+                  r="4" fill={color} />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[11px] font-black text-gray-800 leading-tight text-center px-1">{value}</span>
+        </div>
+      </div>
+      <p className={`text-[11px] font-semibold text-center leading-tight ${onClick ? 'text-blue-600 underline decoration-dotted group-hover:text-blue-800' : 'text-gray-600'}`}>{label}</p>
+      {trend !== null && trend !== undefined && (
+        <p className={`text-[11px] font-bold ${trend >= 0 ? 'text-emerald-500' : 'text-amber-500'}`}>
+          {trend >= 0 ? '+' : ''}{fmt(trend, 2)}%
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── P. Items Sold By Name ────────────────────────────────────────
+function ItemsSoldByName({ api }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [start, setStart] = useState(new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0]);
+  const [end, setEnd]     = useState(today);
+  const ref = useRef(null);
+  const ud = (s, e) => { setStart(s); setEnd(e); };
+  const [detailModal, setDetailModal] = useState(null); // null | 'qty' | 'revenue'
+
+  const diffDays = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  const prevEnd   = new Date(new Date(start) - 86400000).toISOString().split('T')[0];
+  const prevStart = new Date(new Date(start) - diffDays * 86400000).toISOString().split('T')[0];
+
+  const { data, isLoading } = useQuery(
+    ['rpt-items-name', start, end],
+    () => api.get('/reports/menu-performance', { params: { start_date: start, end_date: end, limit: 50 } }).then(r => r.data)
+  );
+  const { data: prevData } = useQuery(
+    ['rpt-items-name-prev', prevStart, prevEnd],
+    () => api.get('/reports/menu-performance', { params: { start_date: prevStart, end_date: prevEnd, limit: 50 } }).then(r => r.data)
+  );
+
+  const items     = data?.item_performance     || [];
+  const prevItems = prevData?.item_performance || [];
+
+  const totalQty  = items.reduce((s, i) => s + parseInt(i.total_quantity || 0), 0);
+  const totalRev  = items.reduce((s, i) => s + parseFloat(i.total_revenue || 0), 0);
+  const avgPrice  = items.length ? items.reduce((s, i) => s + parseFloat(i.avg_unit_price || 0), 0) / items.length : 0;
+
+  const prevQty  = prevItems.reduce((s, i) => s + parseInt(i.total_quantity || 0), 0);
+  const prevRev  = prevItems.reduce((s, i) => s + parseFloat(i.total_revenue || 0), 0);
+  const prevAvg  = prevItems.length ? prevItems.reduce((s, i) => s + parseFloat(i.avg_unit_price || 0), 0) / prevItems.length : 0;
+
+  const trendQty = prevQty  > 0 ? ((totalQty - prevQty) / prevQty) * 100  : null;
+  const trendRev = prevRev  > 0 ? ((totalRev - prevRev) / prevRev) * 100  : null;
+  const trendAvg = prevAvg  > 0 ? ((avgPrice - prevAvg) / prevAvg) * 100  : null;
+
+  const top15 = [...items].sort((a, b) => parseInt(b.total_quantity) - parseInt(a.total_quantity)).slice(0, 15);
+
+  return (
+    <div>
+      <DateBar start={start} end={end} setStart={setStart} setEnd={setEnd}
+        onToday={() => ud(today, today)}
+        onYesterday={() => { const y = new Date(Date.now() - 86400000).toISOString().split('T')[0]; ud(y, y); }}
+        onLast7={() => ud(new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0], today)}
+        onThisMonth={() => { const m = new Date(); m.setDate(1); ud(m.toISOString().split('T')[0], today); }}>
+        <button onClick={() => exportCSV(items, `items-sold-by-name-${start}-${end}`)} className={T.btnGhost}>⬇ CSV</button>
+        <button onClick={() => printSection(ref, 'Items Sold By Name')} className={T.btnPrimary}>🖨 Print</button>
+      </DateBar>
+      {isLoading ? <div className="flex justify-center py-12"><LoadingSpinner /></div> : (
+        <div ref={ref}>
+          <h2 className="text-base font-bold text-gray-900 mb-1">Items Sold By Name</h2>
+          <span className="sub text-xs text-gray-500 mb-4 block">{start} — {end}</span>
+
+          {/* Donut summary row */}
+          <div className="flex items-start justify-around bg-white border border-gray-100 rounded-2xl shadow-sm py-5 px-4 mb-5 no-print">
+            <DonutStat label="Total Qty Sold" value={totalQty} trend={trendQty} color="#f97316" onClick={() => setDetailModal('qty')} />
+            <div className="w-px bg-gray-100 self-stretch" />
+            <DonutStat label="Net Sales" value={`৳${fmt(totalRev, 0)}`} trend={trendRev} color="#22c55e" onClick={() => setDetailModal('revenue')} />
+            <div className="w-px bg-gray-100 self-stretch" />
+            <DonutStat label="Avg Item Price" value={`৳${fmt(avgPrice, 0)}`} trend={trendAvg} color="#3b82f6" />
+          </div>
+
+          {/* Detail modal */}
+          {detailModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDetailModal(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-4 border-b">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-base">
+                      {detailModal === 'qty' ? 'Total Qty Sold — Item Breakdown' : 'Net Sales — Item Breakdown'}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{start} — {end}</p>
+                  </div>
+                  <button onClick={() => setDetailModal(null)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+                </div>
+                <div className="overflow-y-auto flex-1 px-4 py-3">
+                  {[...items]
+                    .sort((a, b) =>
+                      detailModal === 'qty'
+                        ? parseInt(b.total_quantity || 0) - parseInt(a.total_quantity || 0)
+                        : parseFloat(b.total_revenue || 0) - parseFloat(a.total_revenue || 0)
+                    )
+                    .map((item, i) => {
+                      const maxVal = detailModal === 'qty' ? totalQty : totalRev;
+                      const val = detailModal === 'qty' ? parseInt(item.total_quantity || 0) : parseFloat(item.total_revenue || 0);
+                      const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                      return (
+                        <div key={item.id || i} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                          <span className="text-xs text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-semibold text-gray-800 truncate">{item.item_name}</span>
+                              <span className="text-sm font-black text-gray-900 ml-2 shrink-0">
+                                {detailModal === 'qty' ? val : `৳${fmt(val)}`}
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: detailModal === 'qty' ? '#f97316' : '#22c55e' }} />
+                            </div>
+                            <span className="text-[10px] text-gray-400">{item.category_name} · {pct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
+                </div>
+                <div className="px-5 py-3 border-t bg-gray-50 rounded-b-2xl flex justify-between text-xs text-gray-500">
+                  <span>{items.length} items</span>
+                  <span className="font-bold text-gray-800">
+                    Total: {detailModal === 'qty' ? totalQty : `৳${fmt(totalRev)}`}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bar chart */}
+          {top15.length > 0 && (
+            <div className="mb-5 no-print bg-white border border-gray-100 rounded-2xl shadow-sm p-4" style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={top15.map(i => ({ name: i.item_name.length > 14 ? i.item_name.slice(0, 14) + '…' : i.item_name, qty: parseInt(i.total_quantity || 0) }))}
+                  margin={{ top: 4, right: 12, left: -10, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6b7280' }} angle={-35} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} />
+                  <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }} formatter={v => [v, 'Qty']} />
+                  <Bar dataKey="qty" fill="#22c55e" radius={[4, 4, 0, 0]} name="Qty Sold" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {items.length === 0 ? <EmptyState /> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr><Th>#</Th><Th>Item Name</Th><Th>Category</Th><Th right>Qty Sold</Th><Th right>Orders</Th><Th right>Revenue</Th><Th right>Avg Price</Th></tr></thead>
+                <tbody>
+                  {items.map((item, i) => (
+                    <tr key={item.id || i} className={T.rowHover}>
+                      <Td mono>{i + 1}</Td>
+                      <Td><span className="font-semibold text-gray-900">{item.item_name}</span></Td>
+                      <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{item.category_name}</span></Td>
+                      <Td right bold>{parseInt(item.total_quantity || 0)}</Td>
+                      <Td right>{item.orders_count}</Td>
+                      <Td right bold>৳{fmt(item.total_revenue)}</Td>
+                      <Td right>৳{fmt(item.avg_unit_price)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <SumRow>
+                    <td colSpan={3} className="px-3 py-2 text-sm font-bold">TOTAL ({items.length} items)</td>
+                    <td className="px-3 py-2 text-sm font-black text-right">{totalQty}</td>
+                    <td className="px-3 py-2 text-sm font-bold text-right">{items.reduce((s, i) => s + parseInt(i.orders_count || 0), 0)}</td>
+                    <td className="px-3 py-2 text-sm font-black text-right">৳{fmt(totalRev)}</td>
+                    <td />
+                  </SumRow>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Q. Items Sold By Category ────────────────────────────────────
+function ItemsSoldByCategory({ api }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [start, setStart] = useState(new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0]);
+  const [end, setEnd]     = useState(today);
+  const ref = useRef(null);
+  const ud = (s, e) => { setStart(s); setEnd(e); };
+
+  const diffDays = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  const prevEnd   = new Date(new Date(start) - 86400000).toISOString().split('T')[0];
+  const prevStart = new Date(new Date(start) - diffDays * 86400000).toISOString().split('T')[0];
+
+  const { data, isLoading } = useQuery(
+    ['rpt-items-cat', start, end],
+    () => api.get('/reports/menu-performance', { params: { start_date: start, end_date: end } }).then(r => r.data)
+  );
+  const { data: prevData } = useQuery(
+    ['rpt-items-cat-prev', prevStart, prevEnd],
+    () => api.get('/reports/menu-performance', { params: { start_date: prevStart, end_date: prevEnd } }).then(r => r.data)
+  );
+
+  const cats     = data?.category_performance     || [];
+  const prevCats = prevData?.category_performance || [];
+
+  const totalQty = cats.reduce((s, c) => s + parseInt(c.total_quantity || 0), 0);
+  const totalRev = cats.reduce((s, c) => s + parseFloat(c.total_revenue || 0), 0);
+  const uniqueCats = cats.length;
+
+  const prevQty  = prevCats.reduce((s, c) => s + parseInt(c.total_quantity || 0), 0);
+  const prevRev  = prevCats.reduce((s, c) => s + parseFloat(c.total_revenue || 0), 0);
+  const prevCatCount = prevCats.length;
+
+  const trendQty  = prevQty      > 0 ? ((totalQty - prevQty) / prevQty) * 100             : null;
+  const trendRev  = prevRev      > 0 ? ((totalRev - prevRev) / prevRev) * 100             : null;
+  const trendCats = prevCatCount > 0 ? ((uniqueCats - prevCatCount) / prevCatCount) * 100 : null;
+
+  return (
+    <div>
+      <DateBar start={start} end={end} setStart={setStart} setEnd={setEnd}
+        onToday={() => ud(today, today)}
+        onYesterday={() => { const y = new Date(Date.now() - 86400000).toISOString().split('T')[0]; ud(y, y); }}
+        onLast7={() => ud(new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0], today)}
+        onThisMonth={() => { const m = new Date(); m.setDate(1); ud(m.toISOString().split('T')[0], today); }}>
+        <button onClick={() => exportCSV(cats, `items-sold-by-category-${start}-${end}`)} className={T.btnGhost}>⬇ CSV</button>
+        <button onClick={() => printSection(ref, 'Items Sold By Category')} className={T.btnPrimary}>🖨 Print</button>
+      </DateBar>
+      {isLoading ? <div className="flex justify-center py-12"><LoadingSpinner /></div> : (
+        <div ref={ref}>
+          <h2 className="text-base font-bold text-gray-900 mb-1">Items Sold By Category</h2>
+          <span className="sub text-xs text-gray-500 mb-4 block">{start} — {end}</span>
+
+          {/* Donut summary row */}
+          <div className="flex items-start justify-around bg-white border border-gray-100 rounded-2xl shadow-sm py-5 px-4 mb-5 no-print">
+            <DonutStat label="Total Qty Sold" value={totalQty} trend={trendQty} color="#f97316" />
+            <div className="w-px bg-gray-100 self-stretch" />
+            <DonutStat label="Net Sales" value={`৳${fmt(totalRev, 0)}`} trend={trendRev} color="#22c55e" />
+            <div className="w-px bg-gray-100 self-stretch" />
+            <DonutStat label="Categories" value={uniqueCats} trend={trendCats} color="#3b82f6" />
+          </div>
+
+          {/* Bar chart */}
+          {cats.length > 0 && (
+            <div className="mb-5 no-print bg-white border border-gray-100 rounded-2xl shadow-sm p-4" style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={cats.map(c => ({ name: c.category_name, qty: parseInt(c.total_quantity || 0) }))}
+                  margin={{ top: 4, right: 12, left: -10, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6b7280' }} angle={-30} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} />
+                  <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }} formatter={v => [v, 'Qty']} />
+                  <Bar dataKey="qty" fill="#22c55e" radius={[4, 4, 0, 0]} name="Qty Sold" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {cats.length === 0 ? <EmptyState /> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr><Th>Category</Th><Th right>Qty Sold</Th><Th right>Unique Items</Th><Th right>Orders</Th><Th right>Revenue</Th></tr></thead>
+                <tbody>
+                  {cats.map((c, i) => (
+                    <tr key={i} className={T.rowHover}>
+                      <Td><span className="font-semibold text-gray-900">{c.category_name}</span></Td>
+                      <Td right bold>{parseInt(c.total_quantity || 0)}</Td>
+                      <Td right>{c.unique_items_sold}</Td>
+                      <Td right>{c.orders_count}</Td>
+                      <Td right bold>৳{fmt(c.total_revenue)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <SumRow>
+                    <td className="px-3 py-2 text-sm font-bold">TOTAL ({cats.length} categories)</td>
+                    <td className="px-3 py-2 text-sm font-black text-right">{totalQty}</td>
+                    <td className="px-3 py-2 text-sm font-bold text-right">{cats.reduce((s, c) => s + parseInt(c.unique_items_sold || 0), 0)}</td>
+                    <td className="px-3 py-2 text-sm font-bold text-right">{cats.reduce((s, c) => s + parseInt(c.orders_count || 0), 0)}</td>
+                    <td className="px-3 py-2 text-sm font-black text-right">৳{fmt(totalRev)}</td>
+                  </SumRow>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Report Registry ─────────────────────────────────────────────
 const REPORT_GROUPS = [
   { label:'Sales', items:[{ id:'sales-summary', label:'Daily Sales Summary' },{ id:'cancel-report', label:'Cancel Report' },{ id:'hold-report', label:'Hold / Due Report' }] },
   { label:'Financial', items:[{ id:'payment-methods', label:'Payment Methods' },{ id:'vat-report', label:'VAT Report' },{ id:'collection-summary', label:'Collection Report' },{ id:'payment-collection', label:'Payment Collection' },{ id:'discount-report', label:'Discount Report' },{ id:'due-collection', label:'Due Collection' }] },
-  { label:'Operations', items:[{ id:'category-sales', label:'Category Sales' },{ id:'delivery-report', label:'Home Delivery' },{ id:'reservation-report', label:'Reservations' }] },
+  { label:'Operations', items:[{ id:'category-sales', label:'Category Sales' },{ id:'items-by-name', label:'Items Sold By Name' },{ id:'items-by-category', label:'Items Sold By Category' },{ id:'delivery-report', label:'Home Delivery' },{ id:'reservation-report', label:'Reservations' }] },
   { label:'Analytics', items:[{ id:'user-summary', label:'User Sales Summary' },{ id:'yearly-summary', label:'Yearly Summary' },{ id:'customer-search', label:'Customer Search' },{ id:'menu-list', label:'Menu List' }] },
 ];
 const REPORT_COMPONENT = {
@@ -1217,6 +1637,8 @@ const REPORT_COMPONENT = {
   'discount-report':    DiscountReport,
   'due-collection':     DueCollectionReport,
   'category-sales':     CategorySalesReport,
+  'items-by-name':      ItemsSoldByName,
+  'items-by-category':  ItemsSoldByCategory,
   'delivery-report':    DeliveryReport,
   'reservation-report': ReservationReport,
   'user-summary':       UserSalesSummary,
@@ -1229,37 +1651,60 @@ const REPORT_COMPONENT = {
 export default function Reports() {
   const { api } = useAuth();
   const [active, setActive] = useState('sales-summary');
+  const [activeGroup, setActiveGroup] = useState('Sales');
   const ActiveReport = REPORT_COMPONENT[active];
-  const totalReports = REPORT_GROUPS.reduce((s, g) => s + g.items.length, 0);
+
+  const currentGroup = REPORT_GROUPS.find(g => g.label === activeGroup) || REPORT_GROUPS[0];
+
+  const handleGroupChange = (group) => {
+    setActiveGroup(group.label);
+    setActive(group.items[0].id);
+  };
 
   return (
-    <div className="flex h-full min-h-screen bg-gray-50" style={{fontFamily:'Inter,system-ui,sans-serif'}}>
-      {/* ── Sidebar ── */}
-      <aside className="w-60 flex-shrink-0 bg-white border-r border-gray-200 overflow-y-auto no-print">
-        <div className="px-4 pt-5 pb-3 border-b border-gray-100">
-          <h1 className="text-base font-black text-gray-900">Reports</h1>
-          <p className="text-xs text-gray-500">{totalReports} report types</p>
+    <div className="min-h-screen bg-gray-50" style={{ fontFamily: 'Inter,system-ui,sans-serif' }}>
+      {/* ── Top Group Bar ── */}
+      <div className="bg-white border-b border-gray-200 no-print">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex items-center justify-between py-3 border-b border-gray-100">
+            <h1 className="text-base font-black text-gray-900">Reports</h1>
+            <span className="text-xs text-gray-400">{REPORT_GROUPS.reduce((s, g) => s + g.items.length, 0)} report types</span>
+          </div>
+          {/* Group tabs */}
+          <div className="flex gap-1 pt-2">
+            {REPORT_GROUPS.map(group => (
+              <button key={group.label} onClick={() => handleGroupChange(group)}
+                className={`px-4 py-2 text-sm font-semibold transition-colors rounded-t-lg -mb-px border-b-2 ${
+                  activeGroup === group.label
+                    ? 'border-red-600 text-red-700 bg-red-50'
+                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                }`}>
+                {group.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <nav className="py-2">
-          {REPORT_GROUPS.map(group => (
-            <div key={group.label} className="mb-1">
-              <div className="px-4 pt-3 pb-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">{group.label}</div>
-              {group.items.map(item => (
-                <button key={item.id} onClick={() => setActive(item.id)}
-                  className={`w-full text-left px-4 py-2 text-sm transition-colors rounded-none ${active===item.id ? T.tabActive : T.tabInactive}`}>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-      </aside>
+      </div>
 
-      {/* ── Main Content ── */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-6 max-w-5xl mx-auto">
-          {ActiveReport && <ActiveReport api={api} />}
+      {/* ── Sub-report Pills ── */}
+      <div className="bg-white border-b border-gray-100 shadow-sm no-print">
+        <div className="max-w-6xl mx-auto px-6 py-2.5 flex flex-wrap gap-1.5">
+          {currentGroup.items.map(item => (
+            <button key={item.id} onClick={() => setActive(item.id)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
+                active === item.id
+                  ? 'bg-red-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}>
+              {item.label}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {/* ── Report Content ── */}
+      <main className="max-w-6xl mx-auto px-6 py-6">
+        {ActiveReport && <ActiveReport api={api} />}
       </main>
     </div>
   );

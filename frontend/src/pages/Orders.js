@@ -222,11 +222,49 @@ export default function Orders() {
 // ────────────────────────────────────────────────────────────────
 function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, onHoldOrder, userRole, userId }) {
   const { order, items } = detail;
+  const { api } = useAuth();
   const [printing, setPrinting] = useState(false);
   const [showBillPopup, setShowBillPopup] = useState(false);
   const [discountAmount, setDiscountAmount] = useState('0');
+  const [selectedPresetId, setSelectedPresetId] = useState('__none__');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentLast4, setPaymentLast4] = useState('');
+
+  // Load service charge presets
+  const { data: presetsData } = useQuery('sc-presets', () =>
+    api.get('/settings/service-charge-presets').then(r => r.data),
+    { staleTime: 5 * 60 * 1000 }
+  );
+  const presets = presetsData?.presets || [];
+
+  const subtotal = parseFloat(order.subtotal) || 0;
+
+  // Compute ৳ amount for a preset id
+  const computeAmt = (presetId) => {
+    if (presetId === '__none__') return 0;
+    const p = presets.find(x => String(x.id) === presetId);
+    if (!p) return 0;
+    return p.type === 'percentage' ? (subtotal * parseFloat(p.value)) / 100 : parseFloat(p.value);
+  };
+
+  // Auto-select preset that best matches order's current service charge when popup opens
+  const autoSelectPreset = () => {
+    if (presets.length === 0) return '__none__';
+    const curSC = parseFloat(order.service_charge) || 0;
+    if (curSC === 0) return '__none__';
+    for (const p of presets) {
+      const amt = p.type === 'percentage' ? (subtotal * parseFloat(p.value)) / 100 : parseFloat(p.value);
+      if (Math.abs(amt - curSC) < 0.01) return String(p.id);
+    }
+    return '__none__';
+  };
+
+  const handleOpenBillPopup = () => {
+    setSelectedPresetId(autoSelectPreset());
+    setShowBillPopup(true);
+  };
+
+  const serviceChargeAmt = computeAmt(selectedPresetId);
 
   const activeItems = items.filter(i => i.status !== 'cancelled');
   const canEdit = !order.bill_printed && !['done', 'cancelled', 'hold'].includes(order.status)
@@ -255,6 +293,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
     setPrinting(true);
     const data = await onPrintBill(order.id, {
       discount_amount: parseFloat(discountAmount) || 0,
+      service_charge_override: serviceChargeAmt,
       payment_method: paymentMethod,
       payment_last4: ['card', 'bkash', 'nagad'].includes(paymentMethod) ? paymentLast4 : undefined,
     });
@@ -278,7 +317,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
 
   const handleMarkDone = async () => {
     if (!order.bill_printed) {
-      setShowBillPopup(true);
+      handleOpenBillPopup();
       return;
     }
     onUpdateStatus(order.id, 'done');
@@ -361,7 +400,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
             )}
 
             {!order.bill_printed && order.status !== 'cancelled' && (userRole === 'admin' || order.waiter_id === userId) && (
-              <button onClick={() => setShowBillPopup(true)} disabled={printing}
+              <button onClick={handleOpenBillPopup} disabled={printing}
                 className="btn btn-primary flex items-center gap-1.5 disabled:opacity-50">
                 {printing ? <LoadingSpinner size="sm" /> : <PrinterIcon className="h-4 w-4" />}
                 Print Bill
@@ -405,6 +444,26 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
             <div className="mt-2 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
               <h3 className="font-bold text-slate-700 text-sm">Finalize Bill</h3>
               <div>
+                <label className="label">Service Charge</label>
+                <select className="select" value={selectedPresetId} onChange={e => setSelectedPresetId(e.target.value)}>
+                  <option value="__none__">No Service Charge — ৳0.00</option>
+                  {presets.map(p => {
+                    const amt = p.type === 'percentage'
+                      ? (subtotal * parseFloat(p.value)) / 100
+                      : parseFloat(p.value);
+                    const label = p.type === 'percentage'
+                      ? `${p.name} (${p.value}%) — ৳${amt.toFixed(2)}`
+                      : `${p.name} — ৳${amt.toFixed(2)} (fixed)`;
+                    return <option key={p.id} value={String(p.id)}>{label}</option>;
+                  })}
+                </select>
+                {serviceChargeAmt > 0 && (
+                  <p className="text-xs text-emerald-600 mt-1 font-medium">
+                    Service charge: ৳{serviceChargeAmt.toFixed(2)}
+                  </p>
+                )}
+              </div>
+              <div>
                 <label className="label">Discount Amount</label>
                 <input className="input" type="number" min="0" step="0.01" value={discountAmount} onChange={(e) => setDiscountAmount(e.target.value)} />
               </div>
@@ -446,19 +505,21 @@ function buildReceiptHTML(data) {
   const rname = restaurant.name || 'FoodPark';
   const address = restaurant.address || '';
   const phone = restaurant.phone || '';
+  const vatNumber = restaurant.vat_number || '';
   const activeItems = (items || []).filter(i => i.status !== 'cancelled');
   const rows = activeItems.map(i =>
     `<tr><td>${i.item_name || i.name || ''}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">${currency}${parseFloat(i.total_price).toFixed(2)}</td></tr>`
   ).join('');
   const vatRow = parseFloat(order.vat_amount) > 0 ? `<tr><td>VAT</td><td style="text-align:right">${currency}${parseFloat(order.vat_amount).toFixed(2)}</td></tr>` : '';
   const svcRow = parseFloat(order.service_charge) > 0 ? `<tr><td>Service Charge</td><td style="text-align:right">${currency}${parseFloat(order.service_charge).toFixed(2)}</td></tr>` : '';
+  const discRow = parseFloat(order.discount_amount) > 0 ? `<tr><td>Discount</td><td style="text-align:right;color:#dc2626">-${currency}${parseFloat(order.discount_amount).toFixed(2)}</td></tr>` : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
   <style>body{font-family:monospace;font-size:12px;padding:12px;max-width:300px;margin:auto}
   h2{text-align:center;font-size:16px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
   table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:11px;text-align:left}
   td{padding:2px 0}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:14px}
   .footer{text-align:center;margin-top:10px;font-size:10px;color:#777}@media print{body{margin:0}}</style></head><body>
-  <h2>${rname}</h2>${address ? `<p>${address}</p>` : ''}${phone ? `<p>Tel: ${phone}</p>` : ''}
+  <h2>${rname}</h2>${address ? `<p>${address}</p>` : ''}${phone ? `<p>Tel: ${phone}</p>` : ''}${vatNumber ? `<p>VAT Reg: ${vatNumber}</p>` : ''}
   <div class="divider"></div>
   <p>Order: <strong>${order.order_number}</strong></p>
   <p>${new Date(order.created_at).toLocaleString()}</p>
@@ -469,7 +530,7 @@ function buildReceiptHTML(data) {
   <tbody>${rows}</tbody></table>
   <div class="divider"></div>
   <table><tr><td>Subtotal</td><td style="text-align:right">${currency}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
-  ${vatRow}${svcRow}
+  ${vatRow}${svcRow}${discRow}
   <tr class="total"><td>TOTAL</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
   <div class="divider"></div>
   <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>

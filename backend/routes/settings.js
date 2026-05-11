@@ -78,6 +78,66 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── Service Charge Presets ──────────────────────────────────────────────────
+const DEFAULT_SC_PRESETS = JSON.stringify([
+  { id: 1, name: 'Standard',     value: '10',  type: 'percentage' },
+  { id: 2, name: 'AC Room',      value: '15',  type: 'percentage' },
+  { id: 3, name: 'VIP Service',  value: '20',  type: 'percentage' },
+  { id: 4, name: 'Banquet Hall', value: '500', type: 'fixed' }
+]);
+
+router.get('/service-charge-presets', async (req, res) => {
+  try {
+    let row = await findOne('system_settings', { setting_key: 'service_charge_presets' });
+    if (!row) {
+      await insert('system_settings', {
+        setting_key: 'service_charge_presets',
+        setting_value: DEFAULT_SC_PRESETS,
+        description: 'Named service charge presets',
+        data_type: 'json',
+        is_editable: 1
+      });
+      row = { setting_value: DEFAULT_SC_PRESETS };
+    }
+    res.json({ presets: JSON.parse(row.setting_value) });
+  } catch (e) {
+    console.error('SC presets get error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/service-charge-presets', requireRole(['admin']), async (req, res) => {
+  try {
+    const { presets } = req.body;
+    if (!Array.isArray(presets) || presets.length === 0) {
+      return res.status(400).json({ error: 'presets must be a non-empty array' });
+    }
+    for (const p of presets) {
+      if (!p.name || p.name.trim() === '') return res.status(400).json({ error: 'Each preset must have a name' });
+      if (isNaN(parseFloat(p.value))) return res.status(400).json({ error: 'Each preset value must be a number' });
+      if (!['percentage', 'fixed'].includes(p.type)) return res.status(400).json({ error: 'Type must be percentage or fixed' });
+    }
+    const value = JSON.stringify(presets);
+    const existing = await findOne('system_settings', { setting_key: 'service_charge_presets' });
+    if (existing) {
+      await update('system_settings', { setting_value: value, updated_at: new Date() }, { setting_key: 'service_charge_presets' });
+    } else {
+      await insert('system_settings', {
+        setting_key: 'service_charge_presets',
+        setting_value: value,
+        description: 'Named service charge presets',
+        data_type: 'json',
+        is_editable: 1
+      });
+    }
+    res.json({ message: 'Service charge presets saved', presets });
+  } catch (e) {
+    console.error('SC presets save error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+// ───────────────────────────────────────────────────────────────────────────
+
 // Get specific setting by key
 router.get('/:key', async (req, res) => {
   try {
@@ -482,6 +542,7 @@ router.post('/reset-to-defaults', requireRole(['admin']), async (req, res) => {
       { key: 'vat_percentage', value: '15.00', type: 'number' },
       { key: 'service_charge_percentage', value: '10.00', type: 'number' },
       { key: 'restaurant_name', value: 'FoodPark', type: 'string' },
+      { key: 'restaurant_vat_number', value: '', type: 'string' },
       { key: 'restaurant_address', value: '123 Fashion Street, Dhaka', type: 'string' },
       { key: 'restaurant_phone', value: '+8801234567890', type: 'string' },
       { key: 'currency_symbol', value: '৳', type: 'string' },
