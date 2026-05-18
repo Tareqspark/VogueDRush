@@ -55,6 +55,7 @@ jobs:
             set -euo pipefail
             cd /var/www/foodpark
 
+            git reset --hard HEAD
             git pull origin main
 
             cd backend
