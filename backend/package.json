@@ -35,7 +35,7 @@
     "rate-limit-redis": "^4.3.1",
     "redis": "^5.12.1",
     "socket.io": "^4.7.4",
-    "uuid": "^14.0.0"
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
