@@ -556,11 +556,13 @@ router.post('/reset-to-defaults', requireRole(['admin']), async (req, res) => {
     
     for (const defaultSetting of defaultSettings) {
       try {
-        await update('system_settings', {
-          setting_value: defaultSetting.value,
-          updated_at: new Date()
-        }, { setting_key: defaultSetting.key });
-        
+        const { query } = require('../config/database');
+        await query(
+          `INSERT INTO system_settings (setting_key, setting_value, data_type, updated_at)
+           VALUES (?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()`,
+          [defaultSetting.key, defaultSetting.value, defaultSetting.type]
+        );
         results.push({ key: defaultSetting.key, success: true });
       } catch (error) {
         results.push({ key: defaultSetting.key, success: false, error: error.message });
@@ -587,6 +589,39 @@ router.post('/reset-to-defaults', requireRole(['admin']), async (req, res) => {
   } catch (error) {
     console.error('Reset settings error:', error);
     res.status(500).json({ error: 'Failed to reset settings' });
+  }
+});
+
+// Ensure all default setting keys exist (INSERT IGNORE — safe to run on live DB)
+router.post('/ensure-defaults', requireRole(['admin']), async (req, res) => {
+  try {
+    const { query } = require('../config/database');
+    const defaults = [
+      { key: 'vat_percentage',             value: '15.00',                        type: 'number'  },
+      { key: 'service_charge_percentage',  value: '10.00',                        type: 'number'  },
+      { key: 'restaurant_name',            value: 'FoodPark',                     type: 'string'  },
+      { key: 'restaurant_address',         value: '123 Fashion Street, Dhaka',    type: 'string'  },
+      { key: 'restaurant_phone',           value: '+8801234567890',               type: 'string'  },
+      { key: 'restaurant_email',           value: '',                             type: 'string'  },
+      { key: 'restaurant_vat_number',      value: '',                             type: 'string'  },
+      { key: 'currency_symbol',            value: '৳',                            type: 'string'  },
+      { key: 'enable_delivery',            value: 'true',                         type: 'boolean' },
+      { key: 'delivery_fee',               value: '50.00',                        type: 'number'  },
+      { key: 'advance_payment_required',   value: 'false',                        type: 'boolean' },
+      { key: 'min_advance_percentage',     value: '30.00',                        type: 'number'  },
+    ];
+    const results = [];
+    for (const d of defaults) {
+      const result = await query(
+        `INSERT IGNORE INTO system_settings (setting_key, setting_value, data_type, description, updated_at)
+         VALUES (?, ?, ?, '', NOW())`,
+        [d.key, d.value, d.type]
+      );
+      results.push({ key: d.key, inserted: result.affectedRows > 0 });
+    }
+    res.json({ message: 'ensure-defaults complete', results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

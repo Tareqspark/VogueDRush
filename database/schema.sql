@@ -279,6 +279,8 @@ INSERT INTO system_settings (setting_key, setting_value, description, data_type)
 ('restaurant_name', 'FoodPark', 'Restaurant name for receipts and displays', 'string'),
 ('restaurant_address', '123 Fashion Street, Dhaka', 'Restaurant address', 'string'),
 ('restaurant_phone', '+8801234567890', 'Restaurant contact phone', 'string'),
+('restaurant_email', '', 'Restaurant email address', 'string'),
+('restaurant_vat_number', '', 'Restaurant VAT registration number', 'string'),
 ('currency_symbol', '৳', 'Currency symbol for display', 'string'),
 ('enable_delivery', 'true', 'Enable delivery orders', 'boolean'),
 ('delivery_fee', '50.00', 'Standard delivery fee', 'number'),
