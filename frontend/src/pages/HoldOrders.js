@@ -240,11 +240,13 @@ function SettleModal({ api, orderId, onClose, onSettled }) {
           </div>
 
           <div className="bg-slate-50 rounded-xl p-3 text-sm border border-slate-100">
-            <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>৳{parseFloat(order.subtotal).toFixed(2)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>Food Price</span><span>৳{parseFloat(order.subtotal).toFixed(2)}</span></div>
             {parseFloat(order.vat_amount) > 0 && <div className="flex justify-between text-slate-500"><span>VAT</span><span>৳{parseFloat(order.vat_amount).toFixed(2)}</span></div>}
+            {parseFloat(order.service_charge) > 0 && <div className="flex justify-between text-slate-500"><span>Service Charge</span><span>৳{parseFloat(order.service_charge).toFixed(2)}</span></div>}
+            <div className="flex justify-between font-semibold text-slate-700 border-t border-slate-100 pt-2"><span>Total</span><span>৳{baseTotal.toFixed(2)}</span></div>
             {discount > 0 && <div className="flex justify-between text-emerald-600"><span>Discount</span><span>-৳{discount.toFixed(2)}</span></div>}
             <div className="flex justify-between font-black text-slate-800 text-base border-t border-slate-100 pt-2">
-              <span>Final Total</span><span>৳{finalTotal.toFixed(2)}</span>
+              <span>Total Payable</span><span>৳{finalTotal.toFixed(2)}</span>
             </div>
           </div>
 
@@ -273,6 +275,7 @@ function buildSettledReceiptHTML(data) {
   const vatRow = parseFloat(order.vat_amount) > 0 ? `<tr><td>VAT</td><td style="text-align:right">${currency}${parseFloat(order.vat_amount).toFixed(2)}</td></tr>` : '';
   const svcRow = parseFloat(order.service_charge) > 0 ? `<tr><td>Service Charge</td><td style="text-align:right">${currency}${parseFloat(order.service_charge).toFixed(2)}</td></tr>` : '';
   const discRow = parseFloat(order.discount_amount) > 0 ? `<tr><td>Discount</td><td style="text-align:right">-${currency}${parseFloat(order.discount_amount).toFixed(2)}</td></tr>` : '';
+  const grossTotal = (parseFloat(order.subtotal) + parseFloat(order.vat_amount || 0) + parseFloat(order.service_charge || 0)).toFixed(2);
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
   <style>body{font-family:monospace;font-size:12px;padding:12px;max-width:300px;margin:auto}
   h2{text-align:center;font-size:16px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
@@ -293,9 +296,11 @@ function buildSettledReceiptHTML(data) {
   <tbody>${rows}</tbody></table>
   <div class="divider"></div>
   <table>
-  <tr><td>Subtotal</td><td style="text-align:right">${currency}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
-  ${vatRow}${svcRow}${discRow}
-  <tr class="total"><td>TOTAL</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
+  <tr><td>Food Price</td><td style="text-align:right">${currency}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
+  ${vatRow}${svcRow}
+  <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${currency}${grossTotal}</strong></td></tr>
+  ${discRow}
+  <tr class="total"><td>Total Payable</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
   <div class="divider"></div>
   <div class="settled">✓ PAID — SETTLED</div>
   <p class="footer">Thank you for dining with us!</p>
