@@ -5,7 +5,8 @@ on:
     branches: [main]
 
 jobs:
-  deploy:
+  build:
+    name: Build Frontend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -18,20 +19,40 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - name: Install & build
         working-directory: frontend
         run: |
           npm ci
           CI=false npm run build
 
-      - name: Update backend on Droplet
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 1
+
+  deploy:
+    name: Deploy to Droplet
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+
+      - name: Prepare server (git pull + backend deps + backup build)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
-            set -e
+            set -euo pipefail
             cd /var/www/foodpark
 
             git pull origin main
@@ -40,7 +61,13 @@ jobs:
             npm ci --omit=dev
             cd ..
 
-      - name: Upload frontend build to Droplet
+            # Back up current build so we can roll back if upload/reload fails
+            rm -rf frontend/build.bak
+            cp -r frontend/build frontend/build.bak 2>/dev/null || true
+            rm -rf frontend/build
+            mkdir -p frontend/build
+
+      - name: Upload frontend build
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DROPLET_HOST }}
@@ -48,19 +75,36 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           source: 'frontend/build/*'
           target: '/var/www/foodpark/frontend/build/'
-          strip_components: 0
+          strip_components: 2
 
-      - name: Reload services on Droplet
+      - name: Reload services & health check
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
-            set -e
-            cd /var/www/foodpark
+            set -euo pipefail
+
             pm2 reload foodpark-api --update-env
-            if command -v systemctl >/dev/null 2>&1; then
-              sudo nginx -t && sudo systemctl reload nginx
-            fi
-            echo "✅ Deployment complete"
+            sudo nginx -t && sudo systemctl reload nginx
+
+            # Wait for backend to be ready then health check
+            sleep 4
+            for i in 1 2 3; do
+              if curl -sf http://localhost:5000/health; then
+                echo "Deployment complete"
+                exit 0
+              fi
+              echo "Health check attempt $i failed, retrying in 3s..."
+              sleep 3
+            done
+
+            # Rollback on failure
+            echo "Health check failed — rolling back frontend build"
+            cd /var/www/foodpark
+            rm -rf frontend/build
+            mv frontend/build.bak frontend/build
+            pm2 reload foodpark-api --update-env
+            sudo systemctl reload nginx
+            exit 1
