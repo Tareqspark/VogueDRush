@@ -1266,7 +1266,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
         {/* ── CART PANEL
               Mobile: full-screen cart review, shown only when showMobileCart
               Desktop: right sidebar, always visible ── */}
-        <div className={`flex-col md:w-80 md:min-w-[20rem] md:flex-shrink-0 bg-slate-50 md:border-t-0 ${showMobileCart ? 'flex w-full' : 'hidden md:flex'}`}>
+        <div className={`flex-col md:w-80 md:min-w-[20rem] md:flex-shrink-0 bg-slate-50 md:border-t-0 ${showMobileCart ? 'flex flex-1 min-h-0 w-full' : 'hidden md:flex'}`}>
 
           {/* Cart header */}
           <div className="p-4 border-b border-slate-200 flex items-center gap-3 bg-white">
