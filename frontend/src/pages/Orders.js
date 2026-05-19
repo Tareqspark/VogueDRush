@@ -628,11 +628,11 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
-      <div className="relative bg-white flex flex-col lg:flex-row w-full max-w-5xl mx-auto my-4 rounded-2xl overflow-hidden border border-sky-100"
+      <div className="relative bg-white flex flex-col md:flex-row w-full max-w-5xl mx-auto my-2 md:my-4 rounded-2xl overflow-hidden border border-sky-100 max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)]"
         style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
 
         {/* Left: order items + menu */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-slate-100 overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col min-h-[50vh] md:min-h-0 border-r border-slate-100 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white flex items-center justify-between">
             <div>
               <h2 className="font-black text-slate-800">Edit Order</h2>
@@ -710,7 +710,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
         </div>
 
         {/* Right: Changes summary */}
-        <div className="w-full lg:w-80 flex flex-col bg-slate-50">
+        <div className="w-full md:w-80 md:min-w-[20rem] md:flex-shrink-0 flex flex-col bg-slate-50 border-t md:border-t-0 max-h-[45vh] md:max-h-none overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-white">
             <h2 className="font-black text-slate-800">Changes</h2>
           </div>
@@ -1194,38 +1194,47 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
           </div>
           {/* Items grid */}
           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-3 content-start">
-            {items.map(item => (
-              <div key={item.id ?? item.food_item_id ?? item.name}
-                onClick={() => addToCart(item)}
-                className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95 cursor-pointer">
-                <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
-                <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
-                  {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
+            {items.map(item => {
+              const itemId = getItemId(item);
+              const cartItem = cart.find(c => c.id === itemId);
+              return (
+                <div key={item.id ?? item.food_item_id ?? item.name}
+                  onClick={() => addToCart(item)}
+                  className={`relative bg-white border rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95 cursor-pointer ${cartItem ? 'border-sky-300 bg-sky-50/40' : 'border-slate-100'}`}>
+                  {cartItem && (
+                    <span className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-sky-500 text-white text-xs font-black flex items-center justify-center shadow">
+                      {cartItem.qty}
+                    </span>
+                  )}
+                  <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
+                  <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
+                    {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
+                  </div>
+                  <div className="mt-2 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); addToCart(item); }}
+                      className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
+                    >
+                      + Add
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-2 text-right">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      addToCart(item);
-                    }}
-                    className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
-                  >
-                    + Add
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         {/* Right: Cart */}
         <div className="w-full md:w-80 md:min-w-[20rem] md:flex-shrink-0 flex flex-col bg-slate-50 border-t md:border-t-0 max-h-[48vh] md:max-h-none overflow-hidden">
-          <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-white">
-            <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
-            <h2 className="font-black text-slate-800">Cart ({cart.length})</h2>
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white">
+            <div className="flex items-center gap-2">
+              <ShoppingCartIcon className="h-5 w-5 text-sky-500" />
+              <h2 className="font-black text-slate-800">Cart ({cart.reduce((s, c) => s + c.qty, 0)})</h2>
+            </div>
+            {cart.length > 0 && <span className="text-sm font-black text-sky-600">৳{total.toFixed(0)}</span>}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {cart.length === 0 ? (
@@ -1254,7 +1263,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
               </div>
             ))}
           </div>
-          <div className="p-4 border-t border-slate-200 space-y-3 bg-white sticky bottom-0 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <div className="p-4 border-t border-slate-200 space-y-3 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))]">
             <textarea className="textarea text-sm h-14 md:h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
               <div className="flex justify-between text-slate-500"><span>Food Price</span><span>৳{subtotal.toFixed(2)}</span></div>
