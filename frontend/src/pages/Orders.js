@@ -558,6 +558,11 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
     ['order-detail-edit', orderId],
     () => api.get(`/orders/${orderId}`).then(r => r.data)
   );
+  const { data: restaurantConfig } = useQuery(
+    'restaurant-config',
+    () => api.get('/settings/config/restaurant').then(r => r.data),
+    { staleTime: 5 * 60 * 1000 }
+  );
   const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
   const { data: itemsData } = useQuery(['menu-items-edit', categoryFilter, search],
     () => api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: search || undefined } }).then(r => r.data)
@@ -623,8 +628,9 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   }, 0);
   const addSub = toAdd.reduce((s, i) => s + i.price * i.quantity, 0);
   const previewSub = remaining + addSub;
-  const svcRate = order?.order_type === 'dine_in' ? 0.10 : 0;
-  const previewTotal = previewSub * (1 + 0.15 + svcRate);
+  const vatRate = (restaurantConfig?.vat_percentage ?? 15) / 100;
+  const svcRate = order?.order_type === 'dine_in' ? (restaurantConfig?.service_charge_percentage ?? 10) / 100 : 0;
+  const previewTotal = previewSub * (1 + vatRate + svcRate);
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
@@ -912,6 +918,11 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   const { data: tablesData } = useQuery('all-tables', () =>
     api.get('/tables').then(r => r.data)
   );
+  const { data: restaurantConfig } = useQuery(
+    'restaurant-config',
+    () => api.get('/settings/config/restaurant').then(r => r.data),
+    { staleTime: 5 * 60 * 1000 }
+  );
   const { data: categoriesData } = useQuery('categories', () =>
     api.get('/menu/categories').then(r => r.data)
   );
@@ -972,8 +983,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
   };
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const vatRate = 0.15;
-  const serviceRate = orderType === 'dine_in' ? 0.10 : 0;
+  const vatRate = (restaurantConfig?.vat_percentage ?? 15) / 100;
+  const serviceRate = orderType === 'dine_in' ? (restaurantConfig?.service_charge_percentage ?? 10) / 100 : 0;
   const vat = subtotal * vatRate;
   const service = subtotal * serviceRate;
   const total = subtotal + vat + service;
@@ -1267,8 +1278,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
             <textarea className="textarea text-sm h-14 md:h-16" placeholder="Special instructions..." value={specialInstructions} onChange={e => setSpecialInstructions(e.target.value)} />
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
               <div className="flex justify-between text-slate-500"><span>Food Price</span><span>৳{subtotal.toFixed(2)}</span></div>
-              <div className="flex justify-between text-slate-500"><span>VAT (15%)</span><span>৳{vat.toFixed(2)}</span></div>
-              {service > 0 && <div className="flex justify-between text-slate-500"><span>Service (10%)</span><span>৳{service.toFixed(2)}</span></div>}
+              <div className="flex justify-between text-slate-500"><span>VAT ({restaurantConfig?.vat_percentage ?? 15}%)</span><span>৳{vat.toFixed(2)}</span></div>
+              {service > 0 && <div className="flex justify-between text-slate-500"><span>Service ({restaurantConfig?.service_charge_percentage ?? 10}%)</span><span>৳{service.toFixed(2)}</span></div>}
               <div className="flex justify-between font-black text-slate-800 text-base border-t border-slate-200 pt-2"><span>Total Payable</span><span>৳{total.toFixed(2)}</span></div>
             </div>
             <button onClick={submit} disabled={submitting || cart.length === 0}
