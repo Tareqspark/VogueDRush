@@ -38,6 +38,7 @@ const initialState = {
   sessionToken: null,
   loading: true,
   isAuthenticated: false,
+  selectedBranch: JSON.parse(localStorage.getItem('selectedBranch') || 'null'),
 };
 
 // Action types
@@ -51,6 +52,7 @@ const AUTH_ACTIONS = {
   REFRESH_FAILURE: 'REFRESH_FAILURE',
   SET_USER: 'SET_USER',
   CLEAR_ERROR: 'CLEAR_ERROR',
+  SELECT_BRANCH: 'SELECT_BRANCH',
 };
 
 // Reducer function
@@ -138,10 +140,10 @@ const authReducer = (state, action) => {
       };
 
     case AUTH_ACTIONS.CLEAR_ERROR:
-      return {
-        ...state,
-        error: null,
-      };
+      return { ...state, error: null };
+
+    case AUTH_ACTIONS.SELECT_BRANCH:
+      return { ...state, selectedBranch: action.payload };
 
     default:
       return state;
@@ -157,18 +159,19 @@ export const AuthProvider = ({ children }) => {
 
   // Set up axios interceptors
   useEffect(() => {
-    // Request interceptor - add auth token
+    // Request interceptor - add auth token + active branch
     const requestInterceptor = api.interceptors.request.use(
       (config) => {
-        const token = state.accessToken;
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+        if (state.accessToken) {
+          config.headers.Authorization = `Bearer ${state.accessToken}`;
+        }
+        const branch = state.selectedBranch || JSON.parse(localStorage.getItem('selectedBranch') || 'null');
+        if (branch?.id) {
+          config.headers['X-Branch-Id'] = branch.id;
         }
         return config;
       },
-      (error) => {
-        return Promise.reject(error);
-      }
+      (error) => Promise.reject(error)
     );
 
     // Response interceptor - handle token refresh using httpOnly cookies (C-1 fix)
@@ -366,8 +369,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Clear error
-  const clearError = () => {
-    dispatch({ type: AUTH_ACTIONS.CLEAR_ERROR });
+  const clearError = () => dispatch({ type: AUTH_ACTIONS.CLEAR_ERROR });
+
+  // Branch selection — persisted to localStorage so it survives page refresh
+  const selectBranch = (branch) => {
+    localStorage.setItem('selectedBranch', JSON.stringify(branch));
+    dispatch({ type: AUTH_ACTIONS.SELECT_BRANCH, payload: branch });
   };
 
   const value = {
@@ -377,7 +384,8 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     updateProfile,
     clearError,
-    api, // Export the configured axios instance
+    selectBranch,
+    api,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

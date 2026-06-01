@@ -9,6 +9,7 @@ const { createClient } = require('redis');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
+const branchRoutes = require('./routes/branches');
 const userRoutes = require('./routes/users');
 const orderRoutes = require('./routes/orders');
 const menuRoutes = require('./routes/menu');
@@ -378,6 +379,7 @@ app.get('/health', (req, res) => {
 
 // API Routes with specific rate limiting
 app.use('/api/auth', rateLimiters.auth, authRoutes);
+app.use('/api/branches', authenticateToken, branchRoutes);
 app.use('/api/users', authenticateToken, createRoleBasedLimiter({
   admin: { windowMs: 15 * 60 * 1000, max: 50 },
   waiter: { windowMs: 15 * 60 * 1000, max: 30 },

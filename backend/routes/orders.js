@@ -76,21 +76,30 @@ const calculateOrderTotals = async (items, orderType, connection = null) => {
 // Get all orders with filtering and pagination
 router.get('/', async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 50, 
-      status, 
-      order_type, 
-      waiter_id, 
-      start_date, 
+    const {
+      page = 1,
+      limit = 50,
+      status,
+      order_type,
+      waiter_id,
+      start_date,
       end_date,
-      table_id 
+      table_id,
+      branch_id,
     } = req.query;
-    
+
     const limitInt = Math.min(parseInt(limit) || 50, 200); // M-4: cap at 200 to prevent full-table scans
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
+
+    // Branch filter — passed from frontend session
+    const branchFilter = branch_id || req.headers['x-branch-id'];
+    if (branchFilter) {
+      whereClause += ' AND o.branch_id = ?';
+      values.push(parseInt(branchFilter));
+    }
+
     if (status) {
       whereClause += ' AND o.status = ?';
       values.push(status);
@@ -446,15 +455,17 @@ router.get('/:id', validateId, async (req, res) => {
 // Create new order with proper race condition prevention
 router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => {
   try {
-    const { 
-      order_type, 
-      table_id, 
-      customer_name, 
-      customer_phone, 
-      items, 
+    const {
+      order_type,
+      table_id,
+      customer_name,
+      customer_phone,
+      items,
       special_instructions,
-      delivery_details 
+      delivery_details,
+      branch_id,
     } = req.body;
+    const orderBranchId = branch_id || req.headers['x-branch-id'] || 1;
     
     // M-5: Retry up to 3 times on order_number collision (ER_DUP_ENTRY)
     let result;
@@ -502,6 +513,7 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       // Insert order
       const orderData = {
         order_number: generateOrderNumber(),
+        branch_id: parseInt(orderBranchId) || 1,
         order_type,
         table_id: order_type === 'dine_in' ? (table_id || null) : null,
         waiter_id: req.user.id,

@@ -140,9 +140,74 @@ const RouteDataReloader = () => {
   return null;
 };
 
+// ── Branch Selector — shown after login when no branch is stored ──────────
+const BranchSelector = () => {
+  const { api, selectBranch } = useAuth();
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/branches').then(r => {
+      setBranches(r.data.branches || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  const BRANCH_STYLES = [
+    { bg: 'from-sky-500 to-sky-700',    icon: '🏛️' },
+    { bg: 'from-violet-500 to-violet-700', icon: '🌿' },
+    { bg: 'from-emerald-500 to-emerald-700', icon: '🍃' },
+    { bg: 'from-amber-500 to-amber-700',  icon: '⭐' },
+  ];
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6"
+      style={{ background: 'linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 50%, #FEF9C3 100%)' }}>
+      <div className="w-full max-w-xl">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="h-16 w-16 rounded-2xl flex items-center justify-center text-white font-extrabold text-2xl mx-auto mb-4"
+            style={{ background: 'linear-gradient(135deg, #0284C7, #EAB308)' }}>VD</div>
+          <h1 className="text-2xl font-black text-slate-800">Select Branch</h1>
+          <p className="text-slate-500 text-sm mt-1">Choose the branch you want to manage today</p>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {branches.filter(b => b.is_active).map((branch, i) => {
+              const style = BRANCH_STYLES[i % BRANCH_STYLES.length];
+              return (
+                <button
+                  key={branch.id}
+                  onClick={() => selectBranch(branch)}
+                  className={`bg-gradient-to-br ${style.bg} text-white rounded-2xl p-6 text-left hover:scale-105 active:scale-95 transition-all shadow-lg group`}
+                >
+                  <span className="text-4xl mb-3 block">{style.icon}</span>
+                  <h2 className="text-xl font-black leading-tight">{branch.name}</h2>
+                  {branch.address && (
+                    <p className="text-white/70 text-xs mt-1 leading-snug">{branch.address}</p>
+                  )}
+                  {branch.phone && (
+                    <p className="text-white/70 text-xs mt-0.5">{branch.phone}</p>
+                  )}
+                  <div className="mt-4 flex items-center gap-1 text-white/80 text-sm font-semibold group-hover:text-white">
+                    Enter branch →
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Main App Content
 const AppContent = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, selectedBranch } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (loading) {
@@ -154,6 +219,16 @@ const AppContent = () => {
           <p className="mt-4 text-slate-500 text-sm font-medium">Loading Vogue D Rush...</p>
         </div>
       </div>
+    );
+  }
+
+  // Show branch selector when authenticated but no branch chosen yet
+  if (user && !selectedBranch) {
+    return (
+      <Router>
+        <BranchSelector />
+        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+      </Router>
     );
   }
 

@@ -6,6 +6,8 @@ import {
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
   Cog6ToothIcon,
+  BuildingOffice2Icon,
+  ArrowsRightLeftIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -31,7 +33,7 @@ const ROLE_COLORS = {
 };
 
 const Header = ({ onMenuClick }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, selectedBranch, selectBranch } = useAuth();
   const { isConnected } = useSocket();
   const navigate = useNavigate();
   const location = useLocation();
@@ -67,6 +69,19 @@ const Header = ({ onMenuClick }) => {
 
       {/* Right side */}
       <div className="flex items-center gap-2">
+        {/* Branch badge */}
+        {selectedBranch && (
+          <button
+            onClick={() => selectBranch(null)}
+            title="Switch branch"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors"
+          >
+            <BuildingOffice2Icon className="h-3.5 w-3.5" />
+            {selectedBranch.name}
+            <ArrowsRightLeftIcon className="h-3 w-3 opacity-60" />
+          </button>
+        )}
+
         {/* Live status */}
         <div className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${
           isConnected ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'
@@ -119,6 +134,12 @@ const Header = ({ onMenuClick }) => {
                   <button onClick={() => { navigate('/settings'); setShowMenu(false); }}
                     className="flex items-center gap-2.5 w-full px-3 py-2.5 text-sm text-slate-600 hover:bg-sky-50 hover:text-sky-700 rounded-xl transition-colors">
                     <Cog6ToothIcon className="h-4 w-4" /> Settings
+                  </button>
+                  <button onClick={() => { selectBranch(null); setShowMenu(false); }}
+                    className="flex items-center gap-2.5 w-full px-3 py-2.5 text-sm text-violet-600 hover:bg-violet-50 rounded-xl transition-colors">
+                    <ArrowsRightLeftIcon className="h-4 w-4" />
+                    Switch Branch
+                    {selectedBranch && <span className="ml-auto text-xs text-slate-400">{selectedBranch.name}</span>}
                   </button>
                   <div className="border-t border-slate-50 my-1" />
                   <button onClick={handleLogout}

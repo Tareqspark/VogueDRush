@@ -9,19 +9,25 @@ const router = express.Router();
 // Get all tables with optional filtering
 router.get('/', async (req, res) => {
   try {
-    const { status, location, page = 1, limit = 100 } = req.query;
+    const { status, location, page = 1, limit = 100, branch_id } = req.query;
     // M-4: cap limit to prevent full-table scans
     const limitInt = Math.min(parseInt(limit) || 100, 500);
     const offsetInt = (parseInt(page) - 1) * limitInt;
-    
+
     let whereClause = '1=1';
     let values = [];
-    
+
+    const branchFilter = branch_id || req.headers['x-branch-id'];
+    if (branchFilter) {
+      whereClause += ' AND branch_id = ?';
+      values.push(parseInt(branchFilter));
+    }
+
     if (status) {
       whereClause += ' AND status = ?';
       values.push(status);
     }
-    
+
     if (location) {
       whereClause += ' AND location LIKE ?';
       values.push(`%${location}%`);

@@ -35,7 +35,7 @@ const getApiErrorMessage = (error, fallback) => {
 };
 
 export default function Orders() {
-  const { api, user } = useAuth();
+  const { api, user, selectedBranch } = useAuth();
   const queryClient = useQueryClient();
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -47,8 +47,8 @@ export default function Orders() {
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
-    ['orders', filterStatus, filterType],
-    () => api.get('/orders', { params: { status: filterStatus || undefined, order_type: filterType || undefined, limit: 100 } }).then(r => r.data),
+    ['orders', filterStatus, filterType, selectedBranch?.id],
+    () => api.get('/orders', { params: { status: filterStatus || undefined, order_type: filterType || undefined, limit: 100, branch_id: selectedBranch?.id } }).then(r => r.data),
     { refetchInterval: 15000 }
   );
 
