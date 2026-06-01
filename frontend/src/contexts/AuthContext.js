@@ -6,6 +6,23 @@ const defaultApiBaseURL = typeof window !== 'undefined'
   ? `${window.location.origin}/api`
   : 'http://localhost:5000/api';
 
+// ── Refresh deduplication ──────────────────────────────────────────────────
+// Prevents multiple concurrent 401s from each firing an /auth/refresh call.
+// Token rotation means only the first refresh succeeds; subsequent ones with
+// the rotated-out token would fail and trigger LOGOUT. Instead, we queue all
+// waiting requests and replay them once the single refresh completes.
+let isRefreshing = false;
+let refreshSubscribers = [];
+const subscribeTokenRefresh = (cb) => refreshSubscribers.push(cb);
+const onRefreshed = (token) => {
+  refreshSubscribers.forEach(cb => cb(token));
+  refreshSubscribers = [];
+};
+const onRefreshFailed = () => {
+  refreshSubscribers.forEach(cb => cb(null));
+  refreshSubscribers = [];
+};
+
 // Create axios instance
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || defaultApiBaseURL,
@@ -155,6 +172,7 @@ export const AuthProvider = ({ children }) => {
     );
 
     // Response interceptor - handle token refresh using httpOnly cookies (C-1 fix)
+    // Uses deduplication: all concurrent 401s share one refresh call.
     const responseInterceptor = api.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -163,8 +181,20 @@ export const AuthProvider = ({ children }) => {
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
+          // If a refresh is already in progress, queue this request and wait
+          if (isRefreshing) {
+            return new Promise((resolve, reject) => {
+              subscribeTokenRefresh((newToken) => {
+                if (!newToken) return reject(error);
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                resolve(api(originalRequest));
+              });
+            });
+          }
+
+          isRefreshing = true;
+
           try {
-            // Send empty body — backend reads refreshToken + sessionToken from httpOnly cookies
             const response = await axios.post(
               `${api.defaults.baseURL}/auth/refresh`,
               {},
@@ -175,22 +205,18 @@ export const AuthProvider = ({ children }) => {
 
             dispatch({
               type: AUTH_ACTIONS.REFRESH_SUCCESS,
-              payload: {
-                accessToken,
-                refreshToken: newRefreshToken,
-                sessionToken: newSessionToken,
-                user,
-              },
+              payload: { accessToken, refreshToken: newRefreshToken, sessionToken: newSessionToken, user },
             });
-
-            // Only store non-sensitive user object in localStorage
             localStorage.setItem('user', JSON.stringify(user));
 
-            // Retry the original request with new access token
+            isRefreshing = false;
+            onRefreshed(accessToken);
+
             originalRequest.headers.Authorization = `Bearer ${accessToken}`;
             return api(originalRequest);
           } catch (refreshError) {
-            // Refresh failed, logout user
+            isRefreshing = false;
+            onRefreshFailed();
             dispatch({ type: AUTH_ACTIONS.LOGOUT });
             localStorage.removeItem('user');
             toast.error('Session expired. Please login again.');

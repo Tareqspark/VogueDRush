@@ -51,7 +51,8 @@ const Dashboard = () => {
       return response.data;
     },
     {
-      refetchInterval: 30000, // Refetch every 30 seconds
+      refetchInterval: 30000,
+      enabled: user?.role === 'admin' || user?.role === 'manager',
     }
   );
 
@@ -67,6 +68,7 @@ const Dashboard = () => {
     },
     {
       refetchInterval: 30000,
+      enabled: user?.role === 'admin' || user?.role === 'manager',
     }
   );
 
@@ -82,6 +84,7 @@ const Dashboard = () => {
     },
     {
       refetchInterval: 30000,
+      enabled: user?.role === 'admin' || user?.role === 'manager',
     }
   );
 
@@ -114,10 +117,11 @@ const Dashboard = () => {
     },
     {
       refetchInterval: 30000,
+      enabled: user?.role === 'admin' || user?.role === 'manager',
     }
   );
 
-  // Fetch today's reservations
+  // Fetch today's reservations (admin/manager only — waiter dashboard has its own)
   const {
     data: todayReservations,
     isLoading: reservationsLoading,
@@ -128,7 +132,8 @@ const Dashboard = () => {
       return response.data;
     },
     {
-      refetchInterval: 60000, // Refetch every minute
+      refetchInterval: 60000,
+      enabled: user?.role === 'admin' || user?.role === 'manager',
     }
   );
 
@@ -140,7 +145,7 @@ const Dashboard = () => {
       const response = await api.get('/reports/menu-performance', { params: { start_date: start, end_date: end, limit: 8 } });
       return response.data;
     },
-    { refetchInterval: 60000 }
+    { refetchInterval: 60000, enabled: user?.role === 'admin' || user?.role === 'manager' }
   );
 
   const { data: drillOrders } = useQuery(

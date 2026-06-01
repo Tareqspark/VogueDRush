@@ -41,10 +41,11 @@ const createRateLimiter = (options) => {
 
 // Predefined rate limiters for different endpoints
 const rateLimiters = {
-  // General API rate limit
+  // General API rate limit — raised to accommodate dashboard polling
+  // (10+ queries × ~4/min each = ~600/15min per user; 1500 gives headroom)
   general: createRateLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per 15 minutes
+    max: 1500,
     message: {
       error: 'Too many requests, please try again later',
       code: 'GENERAL_RATE_LIMIT_EXCEEDED'
