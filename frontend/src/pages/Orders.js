@@ -1161,7 +1161,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
         {/* ── MENU PANEL
               Mobile: full-screen, hidden when cart review is open
               Desktop: left half, always visible ── */}
-        <div className={`flex-1 min-w-0 flex-col md:border-r border-slate-100 ${showMobileCart ? 'hidden md:flex' : 'flex'}`}>
+        <div className={`min-w-0 flex-col md:border-r border-slate-100 ${showMobileCart ? 'hidden md:flex' : 'flex flex-1 min-h-0'}`}>
           {/* Header */}
           <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-sky-50 to-white">
             <div className="flex items-center gap-3 mb-3">
@@ -1246,22 +1246,24 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
             })}
           </div>
 
-          {/* Mobile-only: sticky cart bar — appears once items are added */}
-          {cart.length > 0 && (
-            <div className="md:hidden border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-              <button
-                onClick={() => setShowMobileCart(true)}
-                className="w-full flex items-center justify-between bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold rounded-xl px-4 py-3 transition-colors"
-              >
-                <span className="flex items-center gap-2 text-sm">
-                  <ShoppingCartIcon className="h-4 w-4" />
-                  {totalQty} item{totalQty !== 1 ? 's' : ''} in cart
-                </span>
-                <span className="text-sm">৳{total.toFixed(0)} · Review →</span>
-              </button>
-            </div>
-          )}
         </div>
+
+        {/* ── MOBILE CART BAR — modal-level sibling so it is never clipped by
+              the items grid. Hidden on desktop (cart panel is always visible). ── */}
+        {!showMobileCart && cart.length > 0 && (
+          <div className="md:hidden flex-shrink-0 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+            <button
+              onClick={() => setShowMobileCart(true)}
+              className="w-full flex items-center justify-between bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold rounded-xl px-4 py-3 transition-colors"
+            >
+              <span className="flex items-center gap-2 text-sm">
+                <ShoppingCartIcon className="h-4 w-4" />
+                {totalQty} item{totalQty !== 1 ? 's' : ''} in cart
+              </span>
+              <span className="text-sm">৳{total.toFixed(0)} · Review →</span>
+            </button>
+          </div>
+        )}
 
         {/* ── CART PANEL
               Mobile: full-screen cart review, shown only when showMobileCart
