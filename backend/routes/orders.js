@@ -1146,8 +1146,13 @@ router.post('/:id/bill', validateId, async (req, res) => {
       status: 'completed'
     });
 
-    // Fetch full bill data
-    const updatedOrder = await findOne('orders', { id });
+    // Fetch full bill data — JOIN users so waiter_full_name is available for receipt
+    const orderRows = await query(
+      `SELECT o.*, u.full_name AS waiter_full_name, u.username AS waiter_name
+       FROM orders o LEFT JOIN users u ON o.waiter_id = u.id WHERE o.id = ?`,
+      [id]
+    );
+    const updatedOrder = orderRows[0];
     const items = await query(
       "SELECT oi.*, fi.name as item_name FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ? AND oi.status != 'cancelled'",
       [id]

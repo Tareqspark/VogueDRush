@@ -247,12 +247,17 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentLast4, setPaymentLast4] = useState('');
 
-  // Load service charge presets
+  // Load service charge presets and restaurant config (used for reprint)
   const { data: presetsData } = useQuery('sc-presets', () =>
     api.get('/settings/service-charge-presets').then(r => r.data),
     { staleTime: 5 * 60 * 1000 }
   );
   const presets = presetsData?.presets || [];
+
+  const { data: restaurantCfg } = useQuery('restaurant-config',
+    () => api.get('/settings/config/restaurant').then(r => r.data),
+    { staleTime: 5 * 60 * 1000 }
+  );
 
   const subtotal = parseFloat(order.subtotal) || 0;
 
@@ -326,7 +331,17 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
   };
 
   const handleReprint = () => {
-    const data = { order, items: activeItems, restaurant: { name: 'FoodPark', currency: '৳' } };
+    const data = {
+      order,
+      items: activeItems,
+      restaurant: {
+        name:       restaurantCfg?.name       || 'FoodPark',
+        address:    restaurantCfg?.address    || '',
+        phone:      restaurantCfg?.phone      || '',
+        vat_number: restaurantCfg?.vat_number || '',
+        currency:   restaurantCfg?.currency   || '৳',
+      },
+    };
     const html = buildReceiptHTML(data);
     const w = window.open('', '_blank', 'width=380,height=650');
     if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
