@@ -985,10 +985,8 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const vatRate = (restaurantConfig?.vat_percentage ?? 15) / 100;
-  const serviceRate = orderType === 'dine_in' ? (restaurantConfig?.service_charge_percentage ?? 10) / 100 : 0;
   const vat = subtotal * vatRate;
-  const service = subtotal * serviceRate;
-  const total = subtotal + vat + service;
+  const total = subtotal + vat;
 
   const submit = async () => {
     if (cart.length === 0) return toast.error('Add items to cart');
@@ -1333,11 +1331,6 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
               <div className="flex justify-between text-slate-500">
                 <span>VAT ({restaurantConfig?.vat_percentage ?? 15}%)</span><span>৳{vat.toFixed(2)}</span>
               </div>
-              {service > 0 && (
-                <div className="flex justify-between text-slate-500">
-                  <span>Service ({restaurantConfig?.service_charge_percentage ?? 10}%)</span><span>৳{service.toFixed(2)}</span>
-                </div>
-              )}
               <div className="flex justify-between font-black text-slate-800 text-base border-t border-slate-200 pt-2">
                 <span>Total Payable</span><span>৳{total.toFixed(2)}</span>
               </div>
