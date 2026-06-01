@@ -566,6 +566,7 @@ function buildReceiptHTML(data) {
   <p>${new Date(order.created_at).toLocaleString()}</p>
   ${order.table_number ? `<p>Table: ${order.table_number}</p>` : ''}
   ${order.customer_name ? `<p>Customer: ${order.customer_name}</p>` : ''}
+  ${order.waiter_full_name || order.waiter_name ? `<p>Served by: ${order.waiter_full_name || order.waiter_name}</p>` : ''}
   <div class="divider"></div>
   <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
   <tbody>${rows}</tbody></table>

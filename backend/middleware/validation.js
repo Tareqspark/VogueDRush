@@ -36,8 +36,8 @@ const validateUser = [
     .isMobilePhone()
     .withMessage('Valid phone number is required'),
   body('role')
-    .isIn(['admin', 'waiter', 'kitchen'])
-    .withMessage('Role must be admin, waiter, or kitchen'),
+    .isIn(['admin', 'manager', 'waiter', 'kitchen'])
+    .withMessage('Role must be admin, manager, waiter, or kitchen'),
   body('password')
     .if(body('password').exists())
     .isLength({ min: 8 })

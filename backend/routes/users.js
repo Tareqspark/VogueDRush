@@ -325,4 +325,85 @@ router.get('/stats/overview', requireAdmin, async (req, res) => {
   }
 });
 
+// ── Get user activity log ──────────────────────────────────────────────────
+router.get('/:id/activity', requireAdmin, validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page = 1, limit = 50, start_date, end_date } = req.query;
+    const { query } = require('../config/database');
+    const limitInt = Math.min(parseInt(limit) || 50, 200);
+    const offsetInt = (parseInt(page) - 1) * limitInt;
+
+    let where = 'al.user_id = ?';
+    const values = [id];
+    if (start_date) { where += ' AND DATE(al.created_at) >= ?'; values.push(start_date); }
+    if (end_date)   { where += ' AND DATE(al.created_at) <= ?'; values.push(end_date); }
+
+    const logs = await query(`
+      SELECT al.id, al.action, al.table_name, al.record_id,
+             al.old_values, al.new_values, al.ip_address, al.created_at,
+             u.full_name AS user_name, u.role AS user_role
+      FROM audit_logs al
+      LEFT JOIN users u ON al.user_id = u.id
+      WHERE ${where}
+      ORDER BY al.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [...values, limitInt, offsetInt]);
+
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM audit_logs al WHERE ${where}`,
+      values
+    );
+
+    res.json({
+      logs,
+      pagination: {
+        page: parseInt(page), limit: limitInt,
+        total: countResult[0].total,
+        pages: Math.ceil(countResult[0].total / limitInt)
+      }
+    });
+  } catch (error) {
+    console.error('User activity error:', error);
+    res.status(500).json({ error: 'Failed to fetch activity log' });
+  }
+});
+
+// ── Get / update user permissions ─────────────────────────────────────────
+router.get('/:id/permissions', requireAdmin, validateId, async (req, res) => {
+  try {
+    const user = await findOne('users', { id: req.params.id });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const perms = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : null;
+    res.json({ permissions: perms || getDefaultPermissions(user.role) });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch permissions' });
+  }
+});
+
+router.put('/:id/permissions', requireAdmin, validateId, async (req, res) => {
+  try {
+    const { permissions } = req.body;
+    if (!permissions || typeof permissions !== 'object') {
+      return res.status(400).json({ error: 'permissions object required' });
+    }
+    const { query } = require('../config/database');
+    await query('UPDATE users SET permissions = ?, updated_at = NOW() WHERE id = ?',
+      [JSON.stringify(permissions), req.params.id]);
+    res.json({ message: 'Permissions updated', permissions });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update permissions' });
+  }
+});
+
+function getDefaultPermissions(role) {
+  const map = {
+    admin:   { orders: true,  kitchen: true,  tables: true,  menu: true,  reports: true,  delivery: true,  reservations: true,  users: true,  settings: true,  financials: true,  inventory: true  },
+    manager: { orders: true,  kitchen: true,  tables: true,  menu: true,  reports: true,  delivery: true,  reservations: true,  users: false, settings: false, financials: true,  inventory: true  },
+    waiter:  { orders: true,  kitchen: false, tables: true,  menu: false, reports: false, delivery: false, reservations: true,  users: false, settings: false, financials: false, inventory: false },
+    kitchen: { orders: false, kitchen: true,  tables: false, menu: false, reports: false, delivery: false, reservations: false, users: false, settings: false, financials: false, inventory: false },
+  };
+  return map[role] || map.waiter;
+}
+
 module.exports = router;
