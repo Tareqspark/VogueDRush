@@ -1231,4 +1231,130 @@ router.patch('/:id/unlock-bill', validateId, requireRole(['admin']), async (req,
   }
 });
 
+// ── Search orders by food name or table number ─────────────────────────────
+router.get('/search/query', async (req, res) => {
+  try {
+    const { q = '' } = req.query;
+    const term = q.trim();
+    if (!term) return res.json({ orders: [] });
+
+    const searchQuery = `
+      SELECT DISTINCT
+        o.id, o.order_number, o.order_type, o.status,
+        o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
+        o.created_at, o.bill_printed,
+        u.full_name  AS waiter_full_name,
+        t.table_number, t.location AS table_location,
+        (
+          SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'id',        oi2.id,
+              'item_name', fi2.name,
+              'quantity',  oi2.quantity,
+              'unit_price',oi2.unit_price,
+              'total_price',oi2.total_price,
+              'status',    oi2.status
+            )
+          )
+          FROM order_items oi2
+          LEFT JOIN food_items fi2 ON oi2.food_item_id = fi2.id
+          WHERE oi2.order_id = o.id AND oi2.status != 'cancelled'
+        ) AS items_json
+      FROM orders o
+      LEFT JOIN users   u  ON o.waiter_id   = u.id
+      LEFT JOIN tables  t  ON o.table_id    = t.id
+      LEFT JOIN order_items oi ON oi.order_id = o.id AND oi.status != 'cancelled'
+      LEFT JOIN food_items  fi ON oi.food_item_id = fi.id
+      WHERE o.status IN ('pending','preparing','ready')
+        AND (
+          fi.name          LIKE CONCAT('%', ?, '%')
+          OR t.table_number LIKE CONCAT('%', ?, '%')
+        )
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `;
+
+    const rows = await query(searchQuery, [term, term]);
+
+    const orders = rows.map(row => ({
+      ...row,
+      items: (() => {
+        try { return JSON.parse(row.items_json) || []; } catch { return []; }
+      })(),
+      items_json: undefined,
+    }));
+
+    res.json({ orders });
+  } catch (error) {
+    console.error('Order search error:', error);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// ── Change table for a dine-in order ───────────────────────────────────────
+router.patch('/:id/table', validateId, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { table_id } = req.body;
+
+    if (!table_id) return res.status(400).json({ error: 'table_id is required' });
+
+    const order = await findOne('orders', { id });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.order_type !== 'dine_in') {
+      return res.status(400).json({ error: 'Table can only be changed for dine-in orders' });
+    }
+    if (order.bill_printed) {
+      return res.status(400).json({ error: 'Bill already printed — unlock it before changing table' });
+    }
+
+    const newTable = await findOne('tables', { id: table_id });
+    if (!newTable) return res.status(404).json({ error: 'Table not found' });
+    if (newTable.status !== 'available' && newTable.id !== order.table_id) {
+      return res.status(400).json({ error: `Table ${newTable.table_number} is not available` });
+    }
+
+    const oldTableId = order.table_id;
+
+    await query('UPDATE orders SET table_id = ?, updated_at = NOW() WHERE id = ?', [table_id, id]);
+
+    // Free old table if no other active orders remain on it
+    if (oldTableId && oldTableId !== parseInt(table_id)) {
+      const activeOnOld = await query(
+        "SELECT id FROM orders WHERE table_id = ? AND status IN ('pending','preparing','ready') AND id != ?",
+        [oldTableId, id]
+      );
+      if (activeOnOld.length === 0) {
+        await query("UPDATE tables SET status = 'available', updated_at = NOW() WHERE id = ?", [oldTableId]);
+      }
+      // Mark new table occupied
+      await query("UPDATE tables SET status = 'occupied', updated_at = NOW() WHERE id = ?", [table_id]);
+    }
+
+    await logManualAudit(
+      req.user.id, 'change_table', 'orders', parseInt(id),
+      { table_id: oldTableId },
+      { table_id: parseInt(table_id), new_table_number: newTable.table_number },
+      req.ip, req.headers['user-agent']
+    );
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('table-status-changed', { tableId: oldTableId, status: 'available' });
+      io.emit('table-status-changed', { tableId: parseInt(table_id), status: 'occupied' });
+    }
+
+    const updated = await query(
+      `SELECT o.*, t.table_number, t.location AS table_location
+       FROM orders o LEFT JOIN tables t ON o.table_id = t.id WHERE o.id = ?`,
+      [id]
+    );
+
+    res.json({ message: `Order moved to table ${newTable.table_number}`, order: updated[0] });
+  } catch (error) {
+    console.error('Change table error:', error);
+    res.status(500).json({ error: 'Failed to change table' });
+  }
+});
+
 module.exports = router;

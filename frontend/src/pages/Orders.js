@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
 import {
   PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
   PencilSquareIcon, PrinterIcon, LockClosedIcon, ArrowLeftIcon,
-  PauseCircleIcon, ClockIcon,
+  PauseCircleIcon, ClockIcon, ArrowsRightLeftIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -38,6 +38,7 @@ export default function Orders() {
   const { api, user } = useAuth();
   const queryClient = useQueryClient();
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -91,9 +92,14 @@ export default function Orders() {
           <h1 className="text-xl font-black text-slate-800">Orders</h1>
           <p className="text-slate-500 text-sm">{orders.length} orders found</p>
         </div>
-        <button onClick={() => setShowNewOrder(true)} className="btn btn-primary">
-          <PlusIcon className="h-4 w-4" /> New Order
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowSearch(true)} className="btn btn-secondary">
+            <MagnifyingGlassIcon className="h-4 w-4" /> Search
+          </button>
+          <button onClick={() => setShowNewOrder(true)} className="btn btn-primary">
+            <PlusIcon className="h-4 w-4" /> New Order
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -201,6 +207,15 @@ export default function Orders() {
         />
       )}
 
+      {/* Search Modal */}
+      {showSearch && (
+        <OrderSearchModal
+          api={api}
+          onClose={() => setShowSearch(false)}
+          onSelectOrder={(id) => { setShowSearch(false); setSelectedOrder(id); }}
+        />
+      )}
+
       {/* New Order Modal */}
       {showNewOrder && (
         <NewOrderModal
@@ -223,8 +238,10 @@ export default function Orders() {
 function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEditOrder, onHoldOrder, userRole, userId }) {
   const { order, items } = detail;
   const { api } = useAuth();
+  const queryClient = useQueryClient();
   const [printing, setPrinting] = useState(false);
   const [showBillPopup, setShowBillPopup] = useState(false);
+  const [showChangeTable, setShowChangeTable] = useState(false);
   const [discountAmount, setDiscountAmount] = useState('0');
   const [selectedPresetId, setSelectedPresetId] = useState('__none__');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -394,6 +411,13 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
               </button>
             )}
 
+            {order.order_type === 'dine_in' && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
+              <button onClick={() => setShowChangeTable(true)}
+                className="btn btn-secondary flex items-center gap-1.5 text-violet-600 border-violet-200 hover:bg-violet-50">
+                <ArrowsRightLeftIcon className="h-4 w-4" /> Change Table
+              </button>
+            )}
+
             {canHold && (
               <button onClick={() => onHoldOrder(order)}
                 className="btn btn-secondary flex items-center gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50">
@@ -494,6 +518,20 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
           )}
         </div>
       </div>
+
+      {showChangeTable && (
+        <ChangeTableModal
+          api={api}
+          order={order}
+          onClose={() => setShowChangeTable(false)}
+          onChanged={() => {
+            setShowChangeTable(false);
+            queryClient.invalidateQueries('orders');
+            queryClient.invalidateQueries(['order-detail', order.id]);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1344,6 +1382,240 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
           </div>
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Order Search Modal — search active orders by food name or table
+// ────────────────────────────────────────────────────────────────
+function OrderSearchModal({ api, onClose, onSelectOrder }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedTerm, setDebouncedTerm] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTerm(searchTerm.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  const { data, isLoading } = useQuery(
+    ['order-search', debouncedTerm],
+    () => api.get('/orders/search/query', { params: { q: debouncedTerm } }).then(r => r.data),
+    { enabled: debouncedTerm.length >= 1, staleTime: 10000 }
+  );
+
+  const orders = data?.orders || [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-4 px-4 pb-4 bg-sky-950/40 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-2xl border border-sky-100 flex flex-col max-h-[90vh] animate-fade-in"
+        style={{ boxShadow: '0 24px 80px rgb(2 132 199 / 0.18)' }}>
+
+        {/* Search input */}
+        <div className="p-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <MagnifyingGlassIcon className="h-5 w-5 text-sky-400 flex-shrink-0" />
+            <input
+              autoFocus
+              className="flex-1 text-base font-medium text-slate-800 placeholder-slate-400 outline-none bg-transparent"
+              placeholder="Search by food name or table number…"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+            {isLoading && <LoadingSpinner size="sm" />}
+            <button onClick={onClose} className="btn btn-ghost btn-icon flex-shrink-0">
+              <XMarkIcon className="h-5 w-5" />
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 mt-2 ml-8">
+            Shows only active orders (pending · preparing · ready)
+          </p>
+        </div>
+
+        {/* Results */}
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100">
+          {!debouncedTerm && (
+            <div className="p-10 text-center text-slate-400">
+              <MagnifyingGlassIcon className="h-10 w-10 mx-auto mb-3 text-slate-200" />
+              <p className="font-medium">Type a food name or table number</p>
+              <p className="text-xs mt-1">e.g. "Nachos" or "T5"</p>
+            </div>
+          )}
+
+          {debouncedTerm && !isLoading && orders.length === 0 && (
+            <div className="p-10 text-center text-slate-400">
+              <p className="font-medium">No active orders found for "{debouncedTerm}"</p>
+            </div>
+          )}
+
+          {orders.map(order => (
+            <div
+              key={order.id}
+              onClick={() => onSelectOrder(order.id)}
+              className="p-4 hover:bg-sky-50 cursor-pointer transition-colors"
+            >
+              {/* Order header row */}
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
+                  {order.table_number && (
+                    <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200">
+                      Table {order.table_number}
+                    </span>
+                  )}
+                  {order.table_location && (
+                    <span className="text-xs text-slate-400">{order.table_location}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+                    {order.status}
+                  </span>
+                  <span className="text-xs text-slate-400 flex items-center gap-1">
+                    <ClockIcon className="h-3 w-3" />
+                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Items list */}
+              <div className="bg-slate-50 rounded-xl p-3 space-y-1">
+                {(order.items || []).map((item, i) => (
+                  <div key={i} className="flex justify-between text-sm">
+                    <span className="text-slate-700">
+                      {item.item_name}
+                      <span className="text-slate-400 ml-1">× {item.quantity}</span>
+                    </span>
+                    <span className="font-semibold text-slate-800">৳{parseFloat(item.total_price).toFixed(0)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm font-black text-slate-800 border-t border-slate-200 pt-1.5 mt-1">
+                  <span>Total</span>
+                  <span>৳{parseFloat(order.total_amount).toFixed(0)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {orders.length > 0 && (
+          <div className="px-4 py-2.5 border-t border-slate-100 text-xs text-slate-400 text-center">
+            {orders.length} active order{orders.length !== 1 ? 's' : ''} · tap any to open
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Change Table Modal — reassign a dine-in order to another table
+// ────────────────────────────────────────────────────────────────
+function ChangeTableModal({ api, order, onClose, onChanged }) {
+  const [saving, setSaving] = useState(false);
+
+  const { data: tablesData } = useQuery('all-tables',
+    () => api.get('/tables').then(r => r.data),
+    { staleTime: 30000 }
+  );
+  const tables = tablesData?.tables || [];
+
+  const locationOrder = ['Big House', 'Small House', 'AC Chad', 'AC Room', 'RB Garden', 'Garden', 'Lake Side'];
+  const tablesByLocation = tables.reduce((acc, t) => {
+    const loc = t.location || 'Other';
+    if (!acc[loc]) acc[loc] = [];
+    acc[loc].push(t);
+    return acc;
+  }, {});
+  const sortedLocations = [
+    ...locationOrder.filter(l => tablesByLocation[l]),
+    ...Object.keys(tablesByLocation).filter(l => !locationOrder.includes(l)),
+  ];
+
+  const handleSelect = async (table) => {
+    if (table.id === order.table_id) return;
+    if (table.status !== 'available') return toast.error(`Table ${table.table_number} is not available`);
+    setSaving(true);
+    try {
+      await api.patch(`/orders/${order.id}/table`, { table_id: table.id });
+      toast.success(`Order moved to Table ${table.table_number}`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to change table');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-sky-950/40 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-2xl border border-violet-100 flex flex-col max-h-[88vh] animate-fade-in"
+        style={{ boxShadow: '0 24px 80px rgb(124 58 237 / 0.15)' }}>
+
+        {/* Header */}
+        <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+          <ArrowsRightLeftIcon className="h-5 w-5 text-violet-500" />
+          <div className="flex-1">
+            <h2 className="font-black text-slate-800">Change Table</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Currently: <span className="font-bold text-slate-600">Table {order.table_number}</span>
+              {order.table_location && ` · ${order.table_location}`}
+            </p>
+          </div>
+          <button onClick={onClose} className="btn btn-ghost btn-icon">
+            <XMarkIcon className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Table grid */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-6">
+          {saving && (
+            <div className="flex justify-center py-6"><LoadingSpinner size="lg" /></div>
+          )}
+          {!saving && sortedLocations.map(location => (
+            <div key={location}>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="flex-1 h-px bg-slate-100" />
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">{location}</span>
+                <span className="flex-1 h-px bg-slate-100" />
+              </div>
+              <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 gap-2">
+                {tablesByLocation[location].map(table => {
+                  const isCurrent = table.id === order.table_id;
+                  const isAvailable = table.status === 'available';
+                  return (
+                    <button
+                      key={table.id}
+                      onClick={() => handleSelect(table)}
+                      disabled={!isAvailable || isCurrent}
+                      title={isCurrent ? 'Current table' : `Table ${table.table_number} · ${table.status}`}
+                      className={`relative rounded-xl py-3 px-1 border-2 flex flex-col items-center gap-0.5 transition-all
+                        ${isCurrent
+                          ? 'bg-violet-50 border-violet-400 text-violet-700 cursor-default'
+                          : isAvailable
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-500 hover:scale-105 active:scale-95 cursor-pointer shadow-sm'
+                            : 'bg-rose-50 border-rose-200 text-rose-400 cursor-not-allowed opacity-60'
+                        }`}
+                    >
+                      <span className="font-black text-sm leading-none">{table.table_number}</span>
+                      <span className="text-[9px] font-semibold capitalize leading-none mt-1 opacity-70">
+                        {isCurrent ? 'current' : table.status}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Legend */}
+        <div className="p-4 border-t border-slate-100 flex items-center gap-6 text-xs text-slate-500">
+          <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-400" />Current</div>
+          <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-400" />Available</div>
+          <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-400" />Occupied</div>
+        </div>
       </div>
     </div>
   );
