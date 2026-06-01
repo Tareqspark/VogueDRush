@@ -210,6 +210,11 @@ const Dashboard = () => {
     };
   }, [refetchStats]);
 
+  // Waiters and kitchen staff get a dedicated operational dashboard
+  if (user?.role === 'waiter' || user?.role === 'kitchen') {
+    return <WaiterDashboard api={api} user={user} isConnected={isConnected} />;
+  }
+
   if (statsLoading || orderStatsLoading || tableStatsLoading || kitchenStatsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -799,5 +804,273 @@ const Dashboard = () => {
     </div>
   );
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Waiter / Kitchen Dashboard — operational view, zero financial data
+// ─────────────────────────────────────────────────────────────────────────────
+function WaiterDashboard({ api, user, isConnected }) {
+  const navigate = useNavigate();
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  const STATUS_COLORS = {
+    pending:   'bg-amber-50 text-amber-700 border-amber-200',
+    preparing: 'bg-blue-50  text-blue-700  border-blue-200',
+    ready:     'bg-emerald-50 text-emerald-700 border-emerald-200',
+    done:      'bg-slate-100 text-slate-500 border-slate-200',
+    hold:      'bg-orange-50 text-orange-600 border-orange-200',
+  };
+
+  // My active orders
+  const { data: myOrdersData, isLoading: ordersLoading, refetch: refetchOrders } = useQuery(
+    ['waiter-my-orders', user?.id],
+    () => api.get('/orders', {
+      params: { waiter_id: user?.id, limit: 50 }
+    }).then(r => r.data),
+    { refetchInterval: 15000 }
+  );
+
+  // Table overview
+  const { data: tableData } = useQuery(
+    'waiter-tables',
+    () => api.get('/tables/stats/overview').then(r => r.data),
+    { refetchInterval: 20000 }
+  );
+
+  // Kitchen queue
+  const { data: kitchenData } = useQuery(
+    'waiter-kitchen',
+    () => api.get('/kitchen', { params: { limit: 100 } }).then(r => r.data),
+    { refetchInterval: 10000 }
+  );
+
+  // Today's reservations
+  const { data: resvData } = useQuery(
+    'waiter-reservations',
+    () => api.get('/reservations/today/list').then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+
+  const allOrders = myOrdersData?.orders || [];
+  const activeOrders = allOrders.filter(o => ['pending', 'preparing', 'ready', 'hold'].includes(o.status));
+  const todayCount = allOrders.length;
+
+  const tables     = tableData?.todayOccupancy || {};
+  const kStats     = kitchenData?.stats || {};
+  const queued     = parseInt(kStats.queued    || 0);
+  const preparing  = parseInt(kStats.preparing || 0);
+  const ready      = parseInt(kStats.ready     || 0);
+  const reservations = resvData?.reservations || [];
+
+  const quickActions = [
+    { label: 'New Order',    icon: '🛍️', path: '/orders',       color: 'bg-sky-500   hover:bg-sky-600'    },
+    { label: 'Kitchen',      icon: '🍳', path: '/kitchen',      color: 'bg-amber-500 hover:bg-amber-600'  },
+    { label: 'Tables',       icon: '🪑', path: '/tables',       color: 'bg-emerald-500 hover:bg-emerald-600' },
+    { label: 'Reservations', icon: '📅', path: '/reservations', color: 'bg-violet-500 hover:bg-violet-600' },
+  ];
+
+  return (
+    <div className="space-y-5 animate-fade-in">
+
+      {/* Welcome banner */}
+      <div className="rounded-2xl p-5 text-white relative overflow-hidden"
+        style={{ background: 'linear-gradient(135deg, #0284C7 0%, #0EA5E9 60%, #38BDF8 100%)' }}>
+        <div className="absolute right-4 top-0 bottom-0 flex items-center opacity-10 text-8xl select-none">☕</div>
+        <div className="relative z-10 flex items-start justify-between">
+          <div>
+            <p className="text-sky-200 text-sm font-medium">{greeting},</p>
+            <h1 className="text-xl font-black mt-0.5">{user?.full_name} 👋</h1>
+            <p className="text-sky-100 text-sm mt-1">
+              {activeOrders.length > 0
+                ? `${activeOrders.length} active order${activeOrders.length !== 1 ? 's' : ''} needs attention`
+                : 'No active orders right now'}
+            </p>
+          </div>
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
+            isConnected ? 'bg-white/20 text-white' : 'bg-rose-500/50 text-white'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-white animate-pulse' : 'bg-rose-200'}`} />
+            {isConnected ? 'Live' : 'Offline'}
+          </div>
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      <div className="grid grid-cols-4 gap-3">
+        {quickActions.map(a => (
+          <button key={a.path} onClick={() => navigate(a.path)}
+            className={`${a.color} text-white rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors active:scale-95`}>
+            <span className="text-2xl">{a.icon}</span>
+            <span className="text-xs font-bold">{a.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* My active orders */}
+      <div className="card">
+        <div className="flex items-center justify-between p-4 border-b border-slate-100">
+          <div>
+            <h2 className="font-black text-slate-800">My Active Orders</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{todayCount} orders placed today</p>
+          </div>
+          <button onClick={() => refetchOrders()}
+            className="btn btn-secondary btn-sm text-xs">Refresh</button>
+        </div>
+
+        {ordersLoading ? (
+          <div className="flex justify-center py-8"><LoadingSpinner /></div>
+        ) : activeOrders.length === 0 ? (
+          <div className="py-10 text-center text-slate-400">
+            <ShoppingCartIcon className="h-10 w-10 mx-auto mb-2 text-slate-200" />
+            <p className="font-medium">No active orders</p>
+            <button onClick={() => navigate('/orders')} className="btn btn-primary mt-3 text-sm">
+              + New Order
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {activeOrders.map(order => (
+              <div key={order.id}
+                onClick={() => navigate('/orders')}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
+                    {order.table_number && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                        Table {order.table_number}
+                      </span>
+                    )}
+                    {!order.table_number && order.order_type === 'delivery' && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200">Delivery</span>
+                    )}
+                    {!order.table_number && order.order_type === 'direct' && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">Takeaway</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {order.customer_name ? ` · ${order.customer_name}` : ''}
+                  </p>
+                </div>
+                <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize flex-shrink-0 ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+                  {order.status === 'hold' ? '⏸ Hold' : order.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Status overview row */}
+      <div className="grid grid-cols-2 gap-4">
+
+        {/* Table status */}
+        <div className="card p-4">
+          <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-2">
+            <span>🪑</span> Table Status
+          </h3>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                <span className="text-sm text-slate-600">Available</span>
+              </div>
+              <span className="font-black text-slate-800">{tables.available_tables ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                <span className="text-sm text-slate-600">Occupied</span>
+              </div>
+              <span className="font-black text-slate-800">{tables.occupied_tables ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                <span className="text-sm text-slate-600">Reserved</span>
+              </div>
+              <span className="font-black text-slate-800">{tables.reserved_tables ?? '—'}</span>
+            </div>
+          </div>
+          <button onClick={() => navigate('/tables')}
+            className="mt-3 w-full text-xs text-sky-600 font-semibold hover:underline text-center">
+            View Floor Map →
+          </button>
+        </div>
+
+        {/* Kitchen queue */}
+        <div className="card p-4">
+          <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-2">
+            <span>🍳</span> Kitchen Queue
+          </h3>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                <span className="text-sm text-slate-600">Queued</span>
+              </div>
+              <span className="font-black text-slate-800">{queued}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-blue-400 animate-pulse" />
+                <span className="text-sm text-slate-600">Preparing</span>
+              </div>
+              <span className="font-black text-slate-800">{preparing}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                <span className="text-sm text-slate-600">Ready</span>
+              </div>
+              <span className={`font-black ${ready > 0 ? 'text-emerald-600' : 'text-slate-800'}`}>{ready}</span>
+            </div>
+          </div>
+          <button onClick={() => navigate('/kitchen')}
+            className="mt-3 w-full text-xs text-sky-600 font-semibold hover:underline text-center">
+            Open Kitchen Display →
+          </button>
+        </div>
+      </div>
+
+      {/* Today's reservations */}
+      {reservations.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between p-4 border-b border-slate-100">
+            <h2 className="font-black text-slate-800">Today's Reservations</h2>
+            <span className="text-xs bg-violet-100 text-violet-700 font-bold px-2 py-1 rounded-full">{reservations.length}</span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {reservations.slice(0, 6).map((r, i) => (
+              <div key={i} className="px-4 py-3 flex items-center gap-3">
+                <span className="text-sm font-black text-slate-800 w-14 flex-shrink-0">
+                  {r.reservation_time?.slice(0, 5)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-700 truncate">{r.customer_name}</p>
+                  <p className="text-xs text-slate-400">{r.party_size} guests{r.table_number ? ` · Table ${r.table_number}` : ''}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold capitalize flex-shrink-0 ${
+                  r.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700' :
+                  r.status === 'pending'   ? 'bg-amber-50 text-amber-700' :
+                  'bg-slate-100 text-slate-500'}`}>
+                  {r.status}
+                </span>
+              </div>
+            ))}
+          </div>
+          {reservations.length > 6 && (
+            <div className="p-3 text-center">
+              <button onClick={() => navigate('/reservations')} className="text-xs text-sky-600 font-semibold hover:underline">
+                View all {reservations.length} reservations →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+    </div>
+  );
+}
 
 export default Dashboard;
