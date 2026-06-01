@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, findMany, findOne, insert, update } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, authenticateToken } = require('../middleware/auth');
 
 // GET all branches
 router.get('/', async (req, res) => {
@@ -29,7 +29,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST create branch (admin only)
-router.post('/', requireRole(['admin']), async (req, res) => {
+router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { name, code, address, phone } = req.body;
     if (!name || !code) return res.status(400).json({ error: 'name and code are required' });
@@ -52,7 +52,7 @@ router.post('/', requireRole(['admin']), async (req, res) => {
 });
 
 // PUT update branch (admin only)
-router.put('/:id', requireRole(['admin']), async (req, res) => {
+router.put('/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { name, address, phone, is_active } = req.body;
     const branch = await findOne('branches', { id: req.params.id });

@@ -142,16 +142,26 @@ const RouteDataReloader = () => {
 
 // ── Branch Selector — shown after login when no branch is stored ──────────
 const BranchSelector = () => {
-  const { api, selectBranch } = useAuth();
+  const { selectBranch } = useAuth();
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
-    api.get('/branches').then(r => {
-      setBranches(r.data.branches || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []); // eslint-disable-line
+  const fetchBranches = () => {
+    setLoading(true);
+    setError(false);
+    // Use the base URL directly — no auth needed for GET /branches
+    const base = typeof window !== 'undefined' ? `${window.location.origin}/api` : '/api';
+    fetch(`${base}/branches`)
+      .then(r => r.json())
+      .then(data => {
+        setBranches(data.branches || []);
+        setLoading(false);
+      })
+      .catch(() => { setError(true); setLoading(false); });
+  };
+
+  useEffect(() => { fetchBranches(); }, []); // eslint-disable-line
 
   const BRANCH_STYLES = [
     { bg: 'from-sky-500 to-sky-700',    icon: '🏛️' },
@@ -174,6 +184,11 @@ const BranchSelector = () => {
 
         {loading ? (
           <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
+        ) : error ? (
+          <div className="text-center py-10">
+            <p className="text-slate-500 mb-4">Could not load branches. Check your connection.</p>
+            <button onClick={fetchBranches} className="btn btn-primary">Retry</button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {branches.filter(b => b.is_active).map((branch, i) => {

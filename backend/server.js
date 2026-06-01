@@ -379,7 +379,7 @@ app.get('/health', (req, res) => {
 
 // API Routes with specific rate limiting
 app.use('/api/auth', rateLimiters.auth, authRoutes);
-app.use('/api/branches', authenticateToken, branchRoutes);
+app.use('/api/branches', branchRoutes); // GET is public (used in login flow); mutations use requireRole internally
 app.use('/api/users', authenticateToken, createRoleBasedLimiter({
   admin: { windowMs: 15 * 60 * 1000, max: 50 },
   waiter: { windowMs: 15 * 60 * 1000, max: 30 },
