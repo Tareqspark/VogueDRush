@@ -225,11 +225,12 @@ function DailySalesSummary({ api }) {
           {orders.length === 0 ? <EmptyState/> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr><Th>Order No</Th><Th>Customer</Th><Th>Type</Th><Th>Payment</Th><Th right>Total</Th><Th right>Discount</Th><Th right>VAT</Th><Th right>Paid</Th><Th>Time</Th></tr></thead>
+                <thead><tr><Th>Order No</Th><Th>Served By</Th><Th>Customer</Th><Th>Type</Th><Th>Payment</Th><Th right>Total</Th><Th right>Discount</Th><Th right>VAT</Th><Th right>Paid</Th><Th>Time</Th></tr></thead>
                 <tbody>
                   {orders.map(o => (
                     <tr key={o.id} className={T.rowHover}>
                       <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
+                      <Td><span className="font-medium text-sky-700">{o.waiter_full_name||o.waiter_name||'—'}</span></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td><span className={`${T.badge} bg-gray-100 text-gray-700`}>{TYPE_LABEL[o.order_type]||o.order_type}</span></Td>
                       <Td><span className={`${T.badge} ${PAY_BADGE[o.payment_method]||'bg-gray-100 text-gray-600'}`}>{o.payment_method||'—'}</span></Td>
@@ -243,7 +244,7 @@ function DailySalesSummary({ api }) {
                 </tbody>
                 <tfoot>
                   <SumRow>
-                    <td colSpan={4} className="px-3 py-2 text-sm font-bold">GRAND TOTAL ({orders.length} orders)</td>
+                    <td colSpan={5} className="px-3 py-2 text-sm font-bold">GRAND TOTAL ({orders.length} orders)</td>
                     <td className="px-3 py-2 text-sm font-black text-right">৳{fmt(t.total_revenue)}</td>
                     <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.total_discount)}</td>
                     <td className="px-3 py-2 text-sm font-bold text-right">৳{fmt(t.total_vat)}</td>
@@ -894,11 +895,12 @@ function DueCollectionReport({ api }) {
           {orders.length === 0 ? <EmptyState msg="No due amounts for this period."/> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr><Th>Order No</Th><Th>Customer</Th><Th>Phone</Th><Th right>Order Total</Th><Th right>Advance</Th><Th right>Due</Th><Th>Status</Th><Th>Date</Th></tr></thead>
+                <thead><tr><Th>Order No</Th><Th>Served By</Th><Th>Customer</Th><Th>Phone</Th><Th right>Order Total</Th><Th right>Advance</Th><Th right>Due</Th><Th>Status</Th><Th>Date</Th></tr></thead>
                 <tbody>
                   {orders.map((o,i) => (
                     <tr key={i} className="hover:bg-orange-50">
                       <Td mono><OrderLink id={o.id} orderNumber={o.order_number} onClick={openOrder} /></Td>
+                      <Td><span className="font-medium text-sky-700">{o.waiter_full_name||o.waiter_name||'—'}</span></Td>
                       <Td>{o.customer_name||'—'}</Td>
                       <Td mono>{o.delivery_phone||'—'}</Td>
                       <Td right>৳{fmt(o.total_amount)}</Td>
