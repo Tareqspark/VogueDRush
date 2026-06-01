@@ -1230,7 +1230,6 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
                   <div className="mt-2 flex items-center justify-between">
                     <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
-                    {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
                   </div>
                   <div className="mt-2 text-right">
                     <button
