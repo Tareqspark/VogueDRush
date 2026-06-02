@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
-import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, XMarkIcon, PencilSquareIcon, TrashIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 
@@ -45,6 +45,29 @@ export default function Tables() {
       queryClient.invalidateQueries(['table-detail', id]);
     } catch (e) {
       toast.error(e.response?.data?.error || 'Failed to update');
+    }
+  };
+
+  const handleEdit = async (id, data) => {
+    try {
+      await api.put(`/tables/${id}`, data);
+      toast.success('Table updated');
+      queryClient.invalidateQueries('tables');
+      queryClient.invalidateQueries(['table-detail', id]);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to update table');
+      throw e;
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await api.delete(`/tables/${id}`);
+      toast.success('Table deleted');
+      setSelectedTable(null);
+      queryClient.invalidateQueries('tables');
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Cannot delete — table may have active orders');
     }
   };
 
@@ -116,7 +139,14 @@ export default function Tables() {
       )}
 
       {selectedTable && tableDetail && (
-        <TableDetailModal table={tableDetail} onClose={() => setSelectedTable(null)} onUpdateStatus={updateStatus} userRole={user.role} />
+        <TableDetailModal
+          table={tableDetail}
+          onClose={() => setSelectedTable(null)}
+          onUpdateStatus={updateStatus}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          userRole={user.role}
+        />
       )}
       {showAddModal && (
         <AddTableModal api={api} onClose={() => setShowAddModal(false)} onCreated={() => { setShowAddModal(false); queryClient.invalidateQueries('tables'); }} />
@@ -125,15 +155,34 @@ export default function Tables() {
   );
 }
 
-function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
+function TableDetailModal({ table, onClose, onUpdateStatus, onEdit, onDelete, userRole }) {
   const order = table.current_order;
   const reservation = table.today_reservation;
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState({ table_number: table.table_number, location: table.location || '' });
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const saveEdit = async () => {
+    if (!form.table_number.trim()) return toast.error('Table number is required');
+    setSaving(true);
+    try {
+      await onEdit(table.id, { table_number: form.table_number.trim(), location: form.location.trim() });
+      setEditMode(false);
+    } catch {
+      // error already toasted in parent
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sky-950/30 backdrop-blur-sm">
       <div className="bg-white w-full max-w-md rounded-2xl border border-sky-100 animate-fade-in"
         style={{ boxShadow: '0 20px 60px rgb(2 132 199 / 0.15)' }}>
         <div className="p-6 space-y-4">
+
+          {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={`h-12 w-12 rounded-2xl flex items-center justify-center text-xl font-black border-2 ${STATUS_STYLES[table.status]}`}>
@@ -144,29 +193,73 @@ function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full border capitalize ${STATUS_BADGES[table.status]}`}>{table.status}</span>
               </div>
             </div>
-            <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+            <div className="flex items-center gap-1">
+              {userRole === 'admin' && !editMode && (
+                <button onClick={() => setEditMode(true)} title="Edit table"
+                  className="btn btn-ghost btn-icon text-violet-500 hover:bg-violet-50">
+                  <PencilSquareIcon className="h-4.5 w-4.5" style={{ height: '1.1rem', width: '1.1rem' }} />
+                </button>
+              )}
+              <button onClick={onClose} className="btn btn-ghost btn-icon"><XMarkIcon className="h-5 w-5" /></button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {table.location && (
-              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-                <div className="text-slate-400 text-xs font-semibold">Location</div>
-                <div className="font-bold text-slate-700 mt-0.5">{table.location}</div>
+          {/* Inline edit form */}
+          {editMode ? (
+            <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-black text-violet-600 uppercase tracking-wider">Edit Table</p>
+              <div>
+                <label className="label">Table Number *</label>
+                <input
+                  className="input"
+                  value={form.table_number}
+                  onChange={e => setForm(f => ({ ...f, table_number: e.target.value }))}
+                  placeholder="e.g. T9"
+                  autoFocus
+                />
               </div>
-            )}
-          </div>
+              <div>
+                <label className="label">Location</label>
+                <input
+                  className="input"
+                  value={form.location}
+                  onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                  placeholder="e.g. First Floor"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setEditMode(false); setForm({ table_number: table.table_number, location: table.location || '' }); }}
+                  className="btn btn-secondary flex-1">Cancel</button>
+                <button onClick={saveEdit} disabled={saving} className="btn btn-primary flex-1 justify-center">
+                  {saving ? <LoadingSpinner size="sm" /> : <><CheckIcon className="h-4 w-4" />Save</>}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <div className="text-slate-400 text-xs font-semibold">Table No.</div>
+                <div className="font-bold text-slate-700 mt-0.5">{table.table_number}</div>
+              </div>
+              {table.location && (
+                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                  <div className="text-slate-400 text-xs font-semibold">Location</div>
+                  <div className="font-bold text-slate-700 mt-0.5">{table.location}</div>
+                </div>
+              )}
+            </div>
+          )}
 
+          {/* Active order */}
           {order && (
             <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 space-y-2">
               <div className="text-sm font-black text-sky-700">Active Order</div>
               <div className="text-sm font-semibold text-slate-700">{order.order_number} — ৳{parseFloat(order.total_amount).toFixed(2)}</div>
               <div className="text-xs text-slate-500 capitalize">{order.status} · by {order.waiter_full_name}</div>
-              {order.items && order.items.map(item => (
-                <div key={item.id} className="text-xs text-slate-400">• {item.item_name} ×{item.quantity}</div>
-              ))}
             </div>
           )}
 
+          {/* Reservation */}
           {reservation && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="text-sm font-black text-amber-700">Today's Reservation</div>
@@ -175,7 +268,8 @@ function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
             </div>
           )}
 
-          {userRole === 'admin' && (
+          {/* Status buttons */}
+          {userRole === 'admin' && !editMode && (
             <div className="flex gap-2 pt-1">
               {table.status !== 'available' && (
                 <button onClick={() => onUpdateStatus(table.id, 'available')} className="flex-1 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors">Set Available</button>
@@ -188,6 +282,26 @@ function TableDetailModal({ table, onClose, onUpdateStatus, userRole }) {
               )}
             </div>
           )}
+
+          {/* Delete — admin only, not when occupied */}
+          {userRole === 'admin' && !editMode && (
+            confirmDelete ? (
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-2">
+                <p className="text-sm font-bold text-rose-700">Delete Table {table.table_number}?</p>
+                <p className="text-xs text-rose-500">This cannot be undone. Only possible if no orders reference this table.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmDelete(false)} className="btn btn-secondary flex-1 text-xs">Cancel</button>
+                  <button onClick={() => onDelete(table.id)} className="flex-1 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors">Yes, Delete</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold text-rose-500 border border-rose-200 hover:bg-rose-50 transition-colors">
+                <TrashIcon className="h-3.5 w-3.5" /> Delete Table
+              </button>
+            )
+          )}
+
         </div>
       </div>
     </div>
