@@ -297,6 +297,21 @@ export default function Kitchen() {
                             </div>
                           )}
                         </div>
+                        {/* Per-item action buttons */}
+                        <div className="flex flex-col gap-1 shrink-0">
+                          {item.status === 'queued' && (
+                            <button onClick={() => startItem(item.id)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 transition-colors">
+                              <BoltIcon className="h-3 w-3" /> Start
+                            </button>
+                          )}
+                          {item.status === 'preparing' && (
+                            <button onClick={() => completeItem(item.id)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors">
+                              <CheckIcon className="h-3 w-3" /> Ready
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
