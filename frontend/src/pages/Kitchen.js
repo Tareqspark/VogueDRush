@@ -31,8 +31,17 @@ export default function Kitchen() {
   const queryClient = useQueryClient();
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('kitchen');
   const searchRef = useRef(null);
   const [now, setNow] = useState(Date.now());
+
+  const TABS = [
+    { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'receipts', label: 'Receipts', icon: '🧾' },
+    { id: 'transaction', label: 'Transaction', icon: '💳' },
+    { id: 'order', label: 'Order', icon: '🛒' },
+    { id: 'kitchen', label: 'Kitchen', icon: '🍳' },
+  ];
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30000);
@@ -138,6 +147,61 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* Top Navigation Tabs */}
+      <div className="bg-white border-b border-slate-100 -mx-6 px-6 sticky top-0 z-10">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-colors border-b-2 ${
+                activeTab === tab.id
+                  ? 'border-sky-500 text-sky-600'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              <span className="mr-1">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'overview' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">📊</div>
+          <h2 className="text-lg font-bold text-slate-800">Overview</h2>
+          <p className="text-slate-500 mt-2">Dashboard overview coming soon...</p>
+        </div>
+      )}
+
+      {activeTab === 'receipts' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">🧾</div>
+          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
+          <p className="text-slate-500 mt-2">Receipt history and management coming soon...</p>
+        </div>
+      )}
+
+      {activeTab === 'transaction' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">💳</div>
+          <h2 className="text-lg font-bold text-slate-800">Transaction</h2>
+          <p className="text-slate-500 mt-2">Transaction details and history coming soon...</p>
+        </div>
+      )}
+
+      {activeTab === 'order' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">🛒</div>
+          <h2 className="text-lg font-bold text-slate-800">Order</h2>
+          <p className="text-slate-500 mt-2">Order management coming soon...</p>
+        </div>
+      )}
+
+      {activeTab === 'kitchen' && (
+        <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -299,6 +363,8 @@ export default function Kitchen() {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );
