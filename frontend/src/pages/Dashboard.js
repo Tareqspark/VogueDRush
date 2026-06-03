@@ -15,6 +15,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
+import ReceiptsTab from '../components/shared/ReceiptsTab';
+import TransactionsTab from '../components/shared/TransactionsTab';
 import StatCard from '../components/Dashboard/StatCard';
 import RecentOrders from '../components/Dashboard/RecentOrders';
 import KitchenStatus from '../components/Dashboard/KitchenStatus';
@@ -186,24 +188,6 @@ const Dashboard = () => {
     ['dash-rev-order-detail', revenueViewOrder],
     () => api.get(`/orders/${revenueViewOrder}`).then(r => r.data),
     { enabled: !!revenueViewOrder }
-  );
-
-  const { data: receiptData } = useQuery(
-    ['dash-receipts', user?.role],
-    async () => {
-      const response = await api.get('/orders/receipts/history', { params: { limit: 50 } });
-      return response.data;
-    },
-    { enabled: user?.role === 'admin', refetchInterval: 60000 }
-  );
-
-  const { data: transactionData } = useQuery(
-    ['dash-transactions', user?.role],
-    async () => {
-      const response = await api.get('/orders/transactions/report', { params: { limit: 50 } });
-      return response.data;
-    },
-    { enabled: user?.role === 'admin', refetchInterval: 60000 }
   );
 
   // Listen for real-time updates
@@ -588,41 +572,8 @@ const Dashboard = () => {
       </>
       )}
 
-      {tab === 'receipts' && user?.role === 'admin' && (
-        <div className="card p-6">
-          <h3 className="text-sm font-black text-slate-800 mb-4">Receipt History</h3>
-          <div className="space-y-2">
-            {(receiptData?.receipts || []).map((r) => (
-              <div key={r.id} className="border border-slate-100 rounded-lg p-3">
-                <div className="flex justify-between items-center gap-2">
-                  <div className="font-bold text-slate-700">{r.order_number}</div>
-                  <div className="text-xs text-slate-500">{new Date(r.bill_printed_at).toLocaleString()}</div>
-                </div>
-                <div className="text-xs text-slate-500 mt-1">{r.order_type === 'direct' ? 'Takeway' : r.order_type} · {r.payment_method || '-'} {r.transaction_id ? `(${r.transaction_id})` : ''}</div>
-                <div className="text-xs text-slate-500">Discount: ৳{parseFloat(r.discount_amount || 0).toFixed(2)} · Total: ৳{parseFloat(r.total_amount || 0).toFixed(2)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === 'transactions' && user?.role === 'admin' && (
-        <div className="card p-6">
-          <h3 className="text-sm font-black text-slate-800 mb-4">Transaction Report</h3>
-          <div className="space-y-2">
-            {(transactionData?.transactions || []).map((t) => (
-              <div key={t.id} className="border border-slate-100 rounded-lg p-3">
-                <div className="flex justify-between items-center gap-2">
-                  <div className="font-bold text-slate-700">{t.order_number}</div>
-                  <div className="text-xs text-slate-500">{new Date(t.created_at).toLocaleString()}</div>
-                </div>
-                <div className="text-xs text-slate-500 mt-1">Method: {t.transaction_id?.startsWith('NAGAD-') ? 'nagad' : t.payment_method} {t.transaction_id ? `(${t.transaction_id})` : ''}</div>
-                <div className="text-xs text-slate-500">Amount: ৳{parseFloat(t.amount || 0).toFixed(2)} · Discount: ৳{parseFloat(t.discount_amount || 0).toFixed(2)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {tab === 'receipts' && user?.role === 'admin' && <ReceiptsTab />}
+      {tab === 'transactions' && user?.role === 'admin' && <TransactionsTab />}
       {/* ── Order Detail Modal ── */}
       {viewingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setViewingOrder(null)}>

@@ -5,6 +5,8 @@ import { PlusIcon, XMarkIcon, PencilSquareIcon, TrashIcon, CheckIcon } from '@he
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
+import ReceiptsTab from '../components/shared/ReceiptsTab';
+import TransactionsTab from '../components/shared/TransactionsTab';
 
 const STATUS_STYLES = {
   available: 'border-emerald-300 bg-emerald-50 text-emerald-700',
@@ -157,21 +159,8 @@ export default function Tables() {
         </>
       )}
 
-      {tab === 'receipts' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">🧾</div>
-          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
-          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
-        </div>
-      )}
-
-      {tab === 'transactions' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">💳</div>
-          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
-          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
-        </div>
-      )}
+      {tab === 'receipts' && <ReceiptsTab />}
+      {tab === 'transactions' && <TransactionsTab />}
 
       {selectedTable && tableDetail && (
         <TableDetailModal

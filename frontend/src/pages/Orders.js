@@ -10,6 +10,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
+import ReceiptsTab from '../components/shared/ReceiptsTab';
+import TransactionsTab from '../components/shared/TransactionsTab';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -237,21 +239,8 @@ export default function Orders() {
         </>
       )}
 
-      {tab === 'receipts' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">🧾</div>
-          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
-          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
-        </div>
-      )}
-
-      {tab === 'transactions' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">💳</div>
-          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
-          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
-        </div>
-      )}
+      {tab === 'receipts' && <ReceiptsTab />}
+      {tab === 'transactions' && <TransactionsTab />}
     </div>
   );
 }
