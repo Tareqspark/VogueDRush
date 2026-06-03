@@ -273,21 +273,29 @@ export default function Kitchen() {
 
                         {/* Per-item action */}
                         <div className="shrink-0">
-                          {item.status === 'queued' && (
-                            <button onClick={() => startItem(item.id)}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors whitespace-nowrap">
-                              <BoltIcon className="h-3 w-3" /> Start
-                            </button>
-                          )}
-                          {item.status === 'preparing' && (
-                            <button onClick={() => completeItem(item.id)}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors whitespace-nowrap">
-                              <CheckIcon className="h-3 w-3" /> Ready
-                            </button>
-                          )}
-                          {item.status === 'ready' && (
-                            <span className="text-xs font-bold text-emerald-600">✓ Done</span>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {item.status === 'queued' && (
+                              <>
+                                <button onClick={() => startItem(item.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors whitespace-nowrap">
+                                  <BoltIcon className="h-3 w-3" /> Start
+                                </button>
+                                <button onClick={() => completeItem(item.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-sm">
+                                  <CheckIcon className="h-3.5 w-3.5" /> Done
+                                </button>
+                              </>
+                            )}
+                            {item.status === 'preparing' && (
+                              <button onClick={() => completeItem(item.id)}
+                                className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-md hover:shadow-lg">
+                                <CheckIcon className="h-4 w-4" /> ✓ Mark Ready
+                              </button>
+                            )}
+                            {item.status === 'ready' && (
+                              <span className="text-xs font-bold text-emerald-600 px-2 py-1 bg-emerald-50 rounded-lg border border-emerald-200">✓ Ready</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
