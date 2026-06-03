@@ -234,6 +234,24 @@ export default function Orders() {
           }}
         />
       )}
+        </>
+      )}
+
+      {tab === 'receipts' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">🧾</div>
+          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
+          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
+        </div>
+      )}
+
+      {tab === 'transactions' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">💳</div>
+          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
+          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1639,24 +1657,6 @@ function ChangeTableModal({ api, order, onClose, onChanged }) {
           <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-400" />Occupied</div>
         </div>
       </div>
-        </>
-      )}
-
-      {tab === 'receipts' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">🧾</div>
-          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
-          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
-        </div>
-      )}
-
-      {tab === 'transactions' && (
-        <div className="card p-8 text-center">
-          <div className="text-4xl mb-3">💳</div>
-          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
-          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
-        </div>
-      )}
     </div>
   );
 }
