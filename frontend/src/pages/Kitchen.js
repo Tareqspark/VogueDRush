@@ -76,6 +76,21 @@ export default function Kitchen() {
     }
   };
 
+  const completeOrder = async (order) => {
+    try {
+      const activeItems = order.items.filter(i => i.status !== 'cancelled' && i.status !== 'ready');
+      if (activeItems.length === 0) {
+        toast.info('All items already ready');
+        return;
+      }
+      await Promise.all(activeItems.map(item => api.patch(`/kitchen/${item.id}/ready`)));
+      toast.success(`Order ${order.order_number} ready!`);
+      queryClient.invalidateQueries('kitchen');
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to mark order ready');
+    }
+  };
+
   const queue = data?.queue || [];
 
   // Group items by order_id
@@ -207,8 +222,8 @@ export default function Kitchen() {
                 className={`bg-white border border-slate-100 rounded-2xl border-l-4 ${ORDER_BORDER[st]} shadow-card hover:shadow-card-hover transition-all`}>
 
                 {/* Order header */}
-                <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-2">
-                  <div>
+                <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
                       {order.table_number && (
@@ -225,7 +240,13 @@ export default function Kitchen() {
                     </div>
                     <div className="text-xs text-slate-400 font-medium mt-1">by {order.waiter_full_name}</div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
+                  <div className="flex flex-col items-end gap-2">
+                    {!allReady && (
+                      <button onClick={() => completeOrder(order)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700 transition-colors shadow-md hover:shadow-lg whitespace-nowrap">
+                        <CheckIcon className="h-4 w-4" /> Order Ready
+                      </button>
+                    )}
                     {maxPriority > 0 && (
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[maxPriority]}`}>
                         {PRIORITY_LABELS[maxPriority]}
@@ -243,7 +264,7 @@ export default function Kitchen() {
                     const elapsed = getElapsed(item);
                     const overdue = elapsed !== null && elapsed > item.estimated_prep_time;
                     return (
-                      <div key={item.id} className="flex items-start gap-3">
+                      <div key={item.id} className="flex items-start justify-between gap-3 pb-2 border-b border-slate-50 last:border-0 last:pb-0">
                         {/* Item details */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -269,33 +290,6 @@ export default function Kitchen() {
                               📝 {item.special_instructions}
                             </div>
                           )}
-                        </div>
-
-                        {/* Per-item action */}
-                        <div className="shrink-0">
-                          <div className="flex items-center gap-1.5">
-                            {item.status === 'queued' && (
-                              <>
-                                <button onClick={() => startItem(item.id)}
-                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors whitespace-nowrap">
-                                  <BoltIcon className="h-3 w-3" /> Start
-                                </button>
-                                <button onClick={() => completeItem(item.id)}
-                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-sm">
-                                  <CheckIcon className="h-3.5 w-3.5" /> Done
-                                </button>
-                              </>
-                            )}
-                            {item.status === 'preparing' && (
-                              <button onClick={() => completeItem(item.id)}
-                                className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-md hover:shadow-lg">
-                                <CheckIcon className="h-4 w-4" /> ✓ Mark Ready
-                              </button>
-                            )}
-                            {item.status === 'ready' && (
-                              <span className="text-xs font-bold text-emerald-600 px-2 py-1 bg-emerald-50 rounded-lg border border-emerald-200">✓ Ready</span>
-                            )}
-                          </div>
                         </div>
                       </div>
                     );
