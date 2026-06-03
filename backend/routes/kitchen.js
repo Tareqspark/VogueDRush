@@ -261,16 +261,15 @@ router.patch('/:id/ready', validateId, async (req, res) => {
       return res.status(404).json({ error: 'Kitchen queue item not found' });
     }
     
-    if (queueItem.status !== 'preparing') {
-      return res.status(400).json({ error: 'Item is not in preparing status' });
+    if (queueItem.status === 'ready' || queueItem.status === 'cancelled') {
+      return res.status(400).json({ error: 'Item is already ready or cancelled' });
     }
-    
+
     const now = new Date();
     let actualPrepTime = null;
-    
+
     if (queueItem.started_at) {
-      // Keep prep time compatible with DB check constraint (> 0)
-      actualPrepTime = Math.max(1, Math.floor((now - new Date(queueItem.started_at)) / 60000)); // in minutes
+      actualPrepTime = Math.max(1, Math.floor((now - new Date(queueItem.started_at)) / 60000));
     }
     
     // Update kitchen queue item
