@@ -452,6 +452,108 @@ router.get('/:id', validateId, async (req, res) => {
   }
 });
 
+// ── Backdated order entry (admin only) ────────────────────────────────────────
+router.post('/backdate', requireRole(['admin']), async (req, res) => {
+  try {
+    const {
+      backdated_at,
+      reason,
+      order_type,
+      table_id,
+      customer_name,
+      customer_phone,
+      items,
+      discount_amount = 0,
+      payment_method = 'cash',
+      payment_last4,
+      branch_id,
+    } = req.body;
+
+    // Validate required fields
+    if (!backdated_at) return res.status(400).json({ error: 'backdated_at is required' });
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Reason is required for backdated entries' });
+    if (!order_type || !['dine_in', 'delivery', 'direct'].includes(order_type)) return res.status(400).json({ error: 'Invalid order_type' });
+    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
+    const validMethods = ['cash', 'card', 'bkash', 'nagad'];
+    if (!validMethods.includes(payment_method)) return res.status(400).json({ error: 'Invalid payment method' });
+    if (['card', 'bkash', 'nagad'].includes(payment_method)) {
+      if (!/^\d{4}$/.test(String(payment_last4 || ''))) return res.status(400).json({ error: 'Last 4 digits required for card/bkash/nagad' });
+    }
+
+    const backdatedDate = new Date(backdated_at);
+    if (isNaN(backdatedDate.getTime())) return res.status(400).json({ error: 'Invalid backdated_at date' });
+    if (backdatedDate > new Date()) return res.status(400).json({ error: 'backdated_at cannot be in the future' });
+
+    const orderBranchId = branch_id || req.headers['x-branch-id'] || 1;
+
+    // Calculate totals using existing helper (no connection needed — read-only)
+    const totals = await calculateOrderTotals(items, order_type);
+    const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
+    const adjustedTotal = Math.max(0, totals.total_amount - safeDiscount);
+
+    // Insert order with backdated timestamps and final status
+    const orderNumber = generateOrderNumber();
+    const [orderResult] = await query(
+      `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
+        customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
+        delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      [
+        orderNumber, parseInt(orderBranchId) || 1, order_type,
+        order_type === 'dine_in' ? (table_id || null) : null,
+        req.user.id,
+        ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
+        ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
+        totals.subtotal, totals.vat_amount, totals.service_charge,
+        totals.delivery_fee, safeDiscount, adjustedTotal,
+        backdatedDate, backdatedDate, backdatedDate,
+      ]
+    );
+    const orderId = orderResult.insertId;
+
+    // Insert order items (status = ready, no kitchen queue)
+    for (const item of items) {
+      const foodRows = await query('SELECT * FROM food_items WHERE id = ?', [item.food_item_id]);
+      const foodItem = foodRows[0];
+      if (!foodItem) continue;
+      const unitPrice = foodItem.promotional_price || foodItem.price;
+      await query(
+        `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
+        [orderId, item.food_item_id, item.quantity, unitPrice, unitPrice * item.quantity,
+         item.special_instructions || null, backdatedDate]
+      );
+    }
+
+    // Insert payment record
+    const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
+    await query(
+      `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
+       VALUES (?, ?, ?, ?, 'completed', ?)`,
+      [orderId, payment_method, adjustedTotal,
+       payment_last4 ? `${payment_method.toUpperCase()}${txnSuffix}` : null,
+       backdatedDate]
+    );
+
+    // Audit log
+    await logManualAudit(
+      req.user.id, 'backdate_order', 'orders', orderId, null,
+      { order_number: orderNumber, backdated_at, reason: reason.trim(), total: adjustedTotal },
+      req.ip, req.headers['user-agent']
+    );
+
+    res.status(201).json({
+      message: 'Backdated order created successfully',
+      order_id: orderId,
+      order_number: orderNumber,
+    });
+  } catch (error) {
+    console.error('Backdate order error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create backdated order' });
+  }
+});
+
 // Create new order with proper race condition prevention
 router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => {
   try {

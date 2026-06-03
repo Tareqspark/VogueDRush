@@ -5,13 +5,14 @@ import {
   PlusIcon, MagnifyingGlassIcon, XMarkIcon,
   ShoppingCartIcon, TrashIcon, MinusIcon, CheckIcon,
   PencilSquareIcon, PrinterIcon, LockClosedIcon, ArrowLeftIcon,
-  PauseCircleIcon, ClockIcon, ArrowsRightLeftIcon,
+  PauseCircleIcon, ClockIcon, ArrowsRightLeftIcon, ArchiveBoxIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
+import BackdateOrderModal from '../components/Orders/BackdateOrderModal';
 import OrdersTab from '../components/shared/OrdersTab';
 import KitchenTab from '../components/shared/KitchenTab';
 
@@ -50,6 +51,7 @@ export default function Orders() {
   const [editingOrder, setEditingOrder] = useState(null);
   const [holdingOrder, setHoldingOrder] = useState(null);
   const [tab, setTab] = useState('overview');
+  const [showBackdate, setShowBackdate] = useState(false);
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
@@ -102,6 +104,11 @@ export default function Orders() {
           <button onClick={() => setShowSearch(true)} className="btn btn-secondary">
             <MagnifyingGlassIcon className="h-4 w-4" /> Search
           </button>
+          {user?.role === 'admin' && (
+            <button onClick={() => setShowBackdate(true)} className="btn btn-secondary">
+              <ClockIcon className="h-4 w-4" /> Backdate Entry
+            </button>
+          )}
           <button onClick={() => setShowNewOrder(true)} className="btn btn-primary">
             <PlusIcon className="h-4 w-4" /> New Order
           </button>
@@ -245,6 +252,13 @@ export default function Orders() {
       {tab === 'kitchen' && <KitchenTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'transactions' && <TransactionsTab />}
+
+      {showBackdate && (
+        <BackdateOrderModal
+          onClose={() => setShowBackdate(false)}
+          onCreated={() => { setShowBackdate(false); queryClient.invalidateQueries('orders'); }}
+        />
+      )}
     </div>
   );
 }
