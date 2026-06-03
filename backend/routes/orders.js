@@ -493,7 +493,7 @@ router.post('/backdate', requireRole(['admin']), async (req, res) => {
 
     // Insert order with backdated timestamps and final status
     const orderNumber = generateOrderNumber();
-    const [orderResult] = await query(
+    const orderResult = await query(
       `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
         customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
         delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
