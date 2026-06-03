@@ -293,11 +293,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
-
-      {tab === 'overview' && (
-        <>
-          {/* ── Stats Grid ── */}
+      {/* ── Stats Grid ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="cursor-pointer" onClick={() => setShowRevenueModal(true)}>
           <StatCard
@@ -333,6 +329,10 @@ const Dashboard = () => {
         />
       </div>
 
+      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
+
+      {tab === 'overview' && (
+        <>
       {/* ── Main Content ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">
