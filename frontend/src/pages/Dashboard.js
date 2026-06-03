@@ -17,6 +17,8 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
+import OrdersTab from '../components/shared/OrdersTab';
+import KitchenTab from '../components/shared/KitchenTab';
 import StatCard from '../components/Dashboard/StatCard';
 import RecentOrders from '../components/Dashboard/RecentOrders';
 import KitchenStatus from '../components/Dashboard/KitchenStatus';
@@ -572,6 +574,8 @@ const Dashboard = () => {
       </>
       )}
 
+      {tab === 'orders' && <OrdersTab />}
+      {tab === 'kitchen' && <KitchenTab />}
       {tab === 'receipts' && user?.role === 'admin' && <ReceiptsTab />}
       {tab === 'transactions' && user?.role === 'admin' && <TransactionsTab />}
       {/* ── Order Detail Modal ── */}

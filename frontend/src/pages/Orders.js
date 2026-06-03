@@ -12,6 +12,8 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
+import OrdersTab from '../components/shared/OrdersTab';
+import KitchenTab from '../components/shared/KitchenTab';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -239,6 +241,8 @@ export default function Orders() {
         </>
       )}
 
+      {tab === 'orders' && <OrdersTab />}
+      {tab === 'kitchen' && <KitchenTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'transactions' && <TransactionsTab />}
     </div>

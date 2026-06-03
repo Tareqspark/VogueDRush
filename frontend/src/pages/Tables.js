@@ -7,6 +7,8 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
+import OrdersTab from '../components/shared/OrdersTab';
+import KitchenTab from '../components/shared/KitchenTab';
 
 const STATUS_STYLES = {
   available: 'border-emerald-300 bg-emerald-50 text-emerald-700',
@@ -159,6 +161,8 @@ export default function Tables() {
         </>
       )}
 
+      {tab === 'orders' && <OrdersTab />}
+      {tab === 'kitchen' && <KitchenTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'transactions' && <TransactionsTab />}
 

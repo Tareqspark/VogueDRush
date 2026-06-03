@@ -8,6 +8,8 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
+import OrdersTab from '../components/shared/OrdersTab';
+import KitchenTab from '../components/shared/KitchenTab';
 
 const PRIORITY_COLORS = { 0: 'text-slate-400 bg-slate-100', 1: 'text-amber-600 bg-amber-50 border border-amber-200', 2: 'text-rose-600 bg-rose-50 border border-rose-200' };
 const PRIORITY_LABELS = { 0: 'Normal', 1: 'High', 2: 'Urgent' };
@@ -326,6 +328,8 @@ export default function Kitchen() {
         </>
       )}
 
+      {tab === 'orders' && <OrdersTab />}
+      {tab === 'kitchen' && <KitchenTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'transactions' && <TransactionsTab />}
     </div>
