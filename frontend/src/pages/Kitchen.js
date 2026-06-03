@@ -5,6 +5,7 @@ import { ClockIcon, FireIcon, CheckIcon, BoltIcon, MagnifyingGlassIcon, XMarkIco
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import TabNavigation from '../components/Layout/TabNavigation';
 
 const PRIORITY_COLORS = { 0: 'text-slate-400 bg-slate-100', 1: 'text-amber-600 bg-amber-50 border border-amber-200', 2: 'text-rose-600 bg-rose-50 border border-rose-200' };
 const PRIORITY_LABELS = { 0: 'Normal', 1: 'High', 2: 'Urgent' };
@@ -139,12 +140,7 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Navigation buttons */}
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('overview')} className={`btn btn-sm ${tab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}>Overview</button>
-        {user?.role === 'admin' && <button onClick={() => setTab('receipts')} className={`btn btn-sm ${tab === 'receipts' ? 'btn-primary' : 'btn-secondary'}`}>Receipts</button>}
-        {user?.role === 'admin' && <button onClick={() => setTab('transactions')} className={`btn btn-sm ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`}>Transaction Report</button>}
-      </div>
+      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
 
       {tab === 'overview' && (
         <>

@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { PlusIcon, XMarkIcon, PencilSquareIcon, TrashIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import TabNavigation from '../components/Layout/TabNavigation';
 
 const STATUS_STYLES = {
   available: 'border-emerald-300 bg-emerald-50 text-emerald-700',
@@ -24,6 +25,7 @@ export default function Tables() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterLocation, setFilterLocation] = useState('');
+  const [tab, setTab] = useState('overview');
 
   const { data, isLoading } = useQuery(
     ['tables', filterStatus, filterLocation],
@@ -94,6 +96,10 @@ export default function Tables() {
         )}
       </div>
 
+      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
+
+      {tab === 'overview' && (
+        <>
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -135,6 +141,35 @@ export default function Tables() {
               <div className="text-xs mt-2 opacity-60 font-medium">{table.location}</div>
             </button>
           ))}
+        </div>
+      )}
+
+      {selectedTable && tableDetail && (
+        <TableDetailModal
+          table={tableDetail}
+          onClose={() => setSelectedTable(null)}
+          onUpdateStatus={updateStatus}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          userRole={user.role}
+        />
+      )}
+        </>
+      )}
+
+      {tab === 'receipts' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">🧾</div>
+          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
+          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
+        </div>
+      )}
+
+      {tab === 'transactions' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">💳</div>
+          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
+          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
         </div>
       )}
 

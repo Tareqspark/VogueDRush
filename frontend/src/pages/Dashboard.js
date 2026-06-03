@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import TabNavigation from '../components/Layout/TabNavigation';
 import StatCard from '../components/Dashboard/StatCard';
 import RecentOrders from '../components/Dashboard/RecentOrders';
 import KitchenStatus from '../components/Dashboard/KitchenStatus';
@@ -292,7 +293,11 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* ── Stats Grid ── */}
+      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
+
+      {tab === 'overview' && (
+        <>
+          {/* ── Stats Grid ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="cursor-pointer" onClick={() => setShowRevenueModal(true)}>
           <StatCard
@@ -328,14 +333,6 @@ const Dashboard = () => {
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('overview')} className={`btn btn-sm ${tab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}>Overview</button>
-        {user?.role === 'admin' && <button onClick={() => setTab('receipts')} className={`btn btn-sm ${tab === 'receipts' ? 'btn-primary' : 'btn-secondary'}`}>Receipt Tab</button>}
-        {user?.role === 'admin' && <button onClick={() => setTab('transactions')} className={`btn btn-sm ${tab === 'transactions' ? 'btn-primary' : 'btn-secondary'}`}>Transaction Report</button>}
-      </div>
-
-      {tab === 'overview' && (
-        <>
       {/* ── Main Content ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">

@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import TabNavigation from '../components/Layout/TabNavigation';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -44,6 +45,7 @@ export default function Orders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [holdingOrder, setHoldingOrder] = useState(null);
+  const [tab, setTab] = useState('overview');
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
@@ -102,6 +104,10 @@ export default function Orders() {
         </div>
       </div>
 
+      <TabNavigation activeTab={tab} setActiveTab={setTab} userRole={user?.role} />
+
+      {tab === 'overview' && (
+        <>
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="select w-36">
@@ -1633,6 +1639,24 @@ function ChangeTableModal({ api, order, onClose, onChanged }) {
           <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-400" />Occupied</div>
         </div>
       </div>
+        </>
+      )}
+
+      {tab === 'receipts' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">🧾</div>
+          <h2 className="text-lg font-bold text-slate-800">Receipts</h2>
+          <p className="text-slate-500 mt-2">Receipt history coming soon...</p>
+        </div>
+      )}
+
+      {tab === 'transactions' && (
+        <div className="card p-8 text-center">
+          <div className="text-4xl mb-3">💳</div>
+          <h2 className="text-lg font-bold text-slate-800">Transaction Report</h2>
+          <p className="text-slate-500 mt-2">Transaction details coming soon...</p>
+        </div>
+      )}
     </div>
   );
 }
