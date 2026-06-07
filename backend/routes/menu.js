@@ -257,11 +257,19 @@ router.get('/items', async (req, res) => {
       ) = 1`;
     }
 
-    // Get items with category info
+    // Get items — include branch-specific price when branch header is present
+    const branchPriceJoin = branchId
+      ? `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${parseInt(branchId)}`
+      : '';
+    const branchPriceSelect = branchId
+      ? ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price'
+      : '';
+
     const itemsQuery = `
-      SELECT fi.*, fc.name as category_name, fc.icon as category_icon
+      SELECT fi.*, fc.name as category_name, fc.icon as category_icon ${branchPriceSelect}
       FROM food_items fi
       LEFT JOIN food_categories fc ON fi.category_id = fc.id
+      ${branchPriceJoin}
       WHERE ${whereClause}
       ORDER BY fc.display_order ASC, fi.display_order ASC, fi.name ASC
       LIMIT ? OFFSET ?

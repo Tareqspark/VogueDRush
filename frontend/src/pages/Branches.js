@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
   PlusIcon, XMarkIcon, PencilSquareIcon, TrashIcon,
   BuildingOffice2Icon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronDownIcon, ChevronUpIcon,
-  BookOpenIcon, ArrowsRightLeftIcon,
+  BookOpenIcon, ArrowsRightLeftIcon, CurrencyDollarIcon, ChartBarIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -26,7 +26,10 @@ export default function Branches() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [hoursOpen, setHoursOpen] = useState(null);
   const [menuOpen, setMenuOpen] = useState(null);
+  const [pricingOpen, setPricingOpen] = useState(null);
   const [showTransfers, setShowTransfers] = useState(false);
+  const [showExpenses, setShowExpenses] = useState(false);
+  const [showPL, setShowPL] = useState(false);
 
   const { data, isLoading } = useQuery(
     'branches-admin',
@@ -65,8 +68,14 @@ export default function Branches() {
           <h1 className="text-xl font-black text-slate-800">Branch Management</h1>
           <p className="text-slate-500 text-sm">{branches.length} branch{branches.length !== 1 ? 'es' : ''} configured</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowTransfers(t => !t)} className="btn btn-secondary">
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => { setShowPL(p => !p); setShowExpenses(false); setShowTransfers(false); }} className="btn btn-secondary">
+            <ChartBarIcon className="h-4 w-4" /> P&L
+          </button>
+          <button onClick={() => { setShowExpenses(e => !e); setShowPL(false); setShowTransfers(false); }} className="btn btn-secondary">
+            <CurrencyDollarIcon className="h-4 w-4" /> Expenses
+          </button>
+          <button onClick={() => { setShowTransfers(t => !t); setShowPL(false); setShowExpenses(false); }} className="btn btn-secondary">
             <ArrowsRightLeftIcon className="h-4 w-4" /> Transfers
           </button>
           <button onClick={() => { setEditing(null); setShowForm(true); }} className="btn btn-primary">
@@ -150,6 +159,14 @@ export default function Branches() {
                     {menuOpen === branch.id ? <ChevronUpIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
                   </button>
                   <button
+                    onClick={() => setPricingOpen(pricingOpen === branch.id ? null : branch.id)}
+                    className="btn btn-sm bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                  >
+                    <CurrencyDollarIcon className="h-4 w-4" />
+                    Pricing
+                    {pricingOpen === branch.id ? <ChevronUpIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
+                  </button>
+                  <button
                     onClick={() => handleToggle(branch)}
                     className={`btn btn-sm ${branch.is_active ? 'bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
                     title={branch.is_active ? 'Deactivate' : 'Activate'}
@@ -182,12 +199,16 @@ export default function Branches() {
               {menuOpen === branch.id && (
                 <BranchMenuPanel api={api} branchId={branch.id} />
               )}
+              {pricingOpen === branch.id && (
+                <BranchPricingPanel api={api} branchId={branch.id} branchName={branch.name} />
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Transfers panel */}
+      {showPL       && <PLPanel api={api} branches={branches} />}
+      {showExpenses && <ExpensesPanel api={api} branches={branches} />}
       {showTransfers && <TransfersPanel api={api} branches={branches} />}
 
       {/* Create / Edit modal */}
@@ -216,6 +237,298 @@ export default function Branches() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BranchPricingPanel({ api, branchId, branchName }) {
+  const [items, setItems] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [edits, setEdits] = useState({});
+
+  React.useEffect(() => {
+    api.get('/branches/menu/pricing', { params: { branch_id: branchId } })
+      .then(r => {
+        setItems(r.data.items);
+        const initial = {};
+        r.data.items.forEach(i => { initial[i.id] = i.branch_price != null ? String(i.branch_price) : ''; });
+        setEdits(initial);
+      });
+  }, [branchId]); // eslint-disable-line
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const prices = items.map(i => ({
+        food_item_id: i.id,
+        branch_price: edits[i.id] !== '' ? parseFloat(edits[i.id]) : null,
+      }));
+      await api.put('/branches/menu/pricing', { branch_id: branchId, prices });
+      toast.success('Pricing saved');
+    } catch { toast.error('Failed to save pricing'); }
+    finally { setSaving(false); }
+  };
+
+  const filtered = items ? items.filter(i => !search || i.name.toLowerCase().includes(search.toLowerCase())) : [];
+  const overrideCount = Object.values(edits).filter(v => v !== '').length;
+
+  const byCategory = filtered.reduce((acc, item) => {
+    const cat = item.category_name || 'Uncategorized';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+
+  if (!items) return <div className="mt-3 flex justify-center py-4"><LoadingSpinner /></div>;
+
+  return (
+    <div className="mt-4 border border-slate-100 rounded-xl overflow-hidden">
+      <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-black text-slate-600 uppercase tracking-wide">Branch Pricing — {branchName}</span>
+          {overrideCount > 0 && <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">{overrideCount} overrides</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="input text-xs py-1 px-2 w-36" />
+          <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">{saving ? <LoadingSpinner size="sm" /> : 'Save'}</button>
+        </div>
+      </div>
+      <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+        {Object.entries(byCategory).map(([cat, catItems]) => (
+          <div key={cat}>
+            <div className="px-4 py-1.5 bg-slate-50/70 text-xs font-bold text-slate-400 uppercase tracking-wide">{cat}</div>
+            {catItems.map(item => (
+              <div key={item.id} className="flex items-center justify-between px-4 py-2 hover:bg-slate-50">
+                <div>
+                  <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                  <span className="ml-2 text-xs text-slate-400">Global: ৳{parseFloat(item.global_price).toFixed(0)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Branch ৳</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={edits[item.id] ?? ''}
+                    onChange={e => setEdits(prev => ({ ...prev, [item.id]: e.target.value }))}
+                    placeholder={parseFloat(item.global_price).toFixed(0)}
+                    className="input text-sm py-1 px-2 w-24 text-right"
+                  />
+                  {edits[item.id] !== '' && (
+                    <button onClick={() => setEdits(prev => ({ ...prev, [item.id]: '' }))} className="text-xs text-slate-400 hover:text-rose-500" title="Remove override">✕</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-xs text-slate-400">
+        Leave blank to use global price. Override takes priority over promotional price.
+      </div>
+    </div>
+  );
+}
+
+function ExpensesPanel({ api, branches }) {
+  const queryClient = useQueryClient();
+  const today = new Date().toISOString().split('T')[0];
+  const CATS = ['rent','utilities','salaries','supplies','maintenance','marketing','other'];
+  const [form, setForm] = useState({ branch_id: '', category: 'other', amount: '', description: '', expense_date: today });
+  const [submitting, setSubmitting] = useState(false);
+  const [filterBranch, setFilterBranch] = useState('');
+  const [dateFrom, setDateFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today);
+
+  const { data, isLoading } = useQuery(
+    ['branch-expenses', filterBranch, dateFrom, dateTo],
+    () => api.get('/branches/expenses', { params: { branch_id: filterBranch || undefined, date_from: dateFrom, date_to: dateTo } }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+  const expenses = data?.expenses || [];
+  const total = expenses.reduce((s, e) => s + parseFloat(e.amount), 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.branch_id || !form.amount || !form.expense_date) { toast.error('Branch, amount and date required'); return; }
+    setSubmitting(true);
+    try {
+      await api.post('/branches/expenses', { ...form, amount: parseFloat(form.amount) });
+      toast.success('Expense recorded');
+      setForm(f => ({ ...f, amount: '', description: '' }));
+      queryClient.invalidateQueries('branch-expenses');
+    } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setSubmitting(false); }
+  };
+
+  const del = async (id) => {
+    if (!window.confirm('Delete this expense?')) return;
+    try { await api.delete(`/branches/expenses/${id}`); queryClient.invalidateQueries('branch-expenses'); toast.success('Deleted'); }
+    catch { toast.error('Failed to delete'); }
+  };
+
+  const CAT_COLOR = { rent:'bg-sky-50 text-sky-700', utilities:'bg-amber-50 text-amber-700', salaries:'bg-violet-50 text-violet-700', supplies:'bg-emerald-50 text-emerald-700', maintenance:'bg-rose-50 text-rose-600', marketing:'bg-pink-50 text-pink-700', other:'bg-slate-100 text-slate-600' };
+
+  return (
+    <div className="card p-5 space-y-5">
+      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><CurrencyDollarIcon className="h-4 w-4 text-emerald-500" /> Branch Expenses</h3>
+
+      <form onSubmit={submit} className="bg-slate-50 rounded-xl p-4 space-y-3">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Add Expense</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="label text-xs">Branch *</label>
+            <select className="select text-sm" required value={form.branch_id} onChange={e => setForm(f=>({...f,branch_id:e.target.value}))}>
+              <option value="">Select</option>
+              {branches.filter(b=>b.is_active).map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label text-xs">Category</label>
+            <select className="select text-sm" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
+              {CATS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label text-xs">Date *</label>
+            <input type="date" className="input text-sm" required value={form.expense_date} max={today} onChange={e=>setForm(f=>({...f,expense_date:e.target.value}))} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label text-xs">Amount (৳) *</label>
+            <input type="number" min="0.01" step="0.01" className="input text-sm" required value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="e.g. 15000" />
+          </div>
+          <div>
+            <label className="label text-xs">Description</label>
+            <input type="text" className="input text-sm" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Optional note" />
+          </div>
+        </div>
+        <button type="submit" disabled={submitting} className="btn btn-primary btn-sm">
+          {submitting ? <LoadingSpinner size="sm" /> : <><PlusIcon className="h-4 w-4" /> Add Expense</>}
+        </button>
+      </form>
+
+      <div className="flex flex-wrap gap-2 items-end">
+        <div><label className="label text-xs">Branch</label>
+          <select className="select text-sm w-40" value={filterBranch} onChange={e=>setFilterBranch(e.target.value)}>
+            <option value="">All</option>
+            {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div><label className="label text-xs">From</label><input type="date" className="input text-sm" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} /></div>
+        <div><label className="label text-xs">To</label><input type="date" className="input text-sm" value={dateTo} onChange={e=>setDateTo(e.target.value)} /></div>
+        {!isLoading && <div className="ml-auto text-sm font-black text-slate-700">Total: <span className="text-sky-600">৳{total.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-6"><LoadingSpinner /></div> :
+        expenses.length === 0 ? <div className="text-center py-6 text-slate-400 text-sm">No expenses found</div> :
+        <div className="space-y-2">
+          {expenses.map(e => (
+            <div key={e.id} className="border border-slate-100 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-slate-800 text-sm">৳{parseFloat(e.amount).toLocaleString()}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold capitalize ${CAT_COLOR[e.category]}`}>{e.category}</span>
+                  <span className="text-xs text-violet-600 font-semibold">{e.branch_name}</span>
+                </div>
+                {e.description && <div className="text-xs text-slate-500 mt-0.5 italic">"{e.description}"</div>}
+                <div className="text-xs text-slate-300 mt-0.5">{e.expense_date} · by {e.created_by_name}</div>
+              </div>
+              <button onClick={()=>del(e.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500"><TrashIcon className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      }
+    </div>
+  );
+}
+
+function PLPanel({ api, branches }) {
+  const today = new Date().toISOString().split('T')[0];
+  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(firstOfMonth);
+  const [dateTo, setDateTo] = useState(today);
+  const [branchId, setBranchId] = useState('');
+
+  const { data, isLoading } = useQuery(
+    ['branch-pl', branchId, dateFrom, dateTo],
+    () => api.get('/branches/pl-report', { params: { branch_id: branchId || undefined, date_from: dateFrom, date_to: dateTo } }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+
+  const rows = data?.pl || [];
+  const EXPENSE_CATS = ['rent','utilities','salaries','supplies','maintenance','marketing','other'];
+  const CAT_COLOR = { rent:'text-sky-600', utilities:'text-amber-600', salaries:'text-violet-600', supplies:'text-emerald-600', maintenance:'text-rose-600', marketing:'text-pink-600', other:'text-slate-500' };
+
+  return (
+    <div className="card p-5 space-y-4">
+      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ChartBarIcon className="h-4 w-4 text-sky-500" /> Profit & Loss Report</h3>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div><label className="label text-xs">Branch</label>
+          <select className="select text-sm w-44" value={branchId} onChange={e=>setBranchId(e.target.value)}>
+            <option value="">All Branches</option>
+            {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div><label className="label text-xs">From</label><input type="date" className="input text-sm" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} /></div>
+        <div><label className="label text-xs">To</label><input type="date" className="input text-sm" value={dateTo} onChange={e=>setDateTo(e.target.value)} /></div>
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-10"><LoadingSpinner /></div> :
+        rows.length === 0 ? <div className="text-center py-8 text-slate-400 text-sm">No data found</div> :
+        <div className="space-y-4">
+          {rows.map(b => (
+            <div key={b.branch_id} className="border border-slate-100 rounded-2xl overflow-hidden">
+              <div className="bg-gradient-to-r from-sky-50 to-violet-50 px-5 py-3 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-sky-400 to-violet-500 flex items-center justify-center text-white font-black text-xs">{b.branch_code}</div>
+                  <span className="font-black text-slate-800">{b.branch_name}</span>
+                  <span className="text-xs text-slate-400">{b.period.from} → {b.period.to}</span>
+                </div>
+                <div className={`text-base font-black ${b.gross_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {b.gross_profit >= 0 ? '▲' : '▼'} ৳{Math.abs(b.gross_profit).toLocaleString(undefined,{maximumFractionDigits:0})}
+                  <span className="ml-1 text-xs font-semibold opacity-70">{b.profit_margin}% margin</span>
+                </div>
+              </div>
+              <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Revenue */}
+                <div className="space-y-2">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-wide">Revenue</p>
+                  <div className="flex justify-between text-sm"><span className="text-slate-500">Orders ({b.order_count})</span><span className="font-bold text-slate-800">৳{b.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-xs text-slate-400"><span>Discounts given</span><span className="text-rose-400">-৳{b.total_discount.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-xs text-slate-400"><span>VAT collected</span><span>৳{b.total_vat.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                </div>
+                {/* Expenses */}
+                <div className="space-y-2">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-wide">Expenses</p>
+                  {EXPENSE_CATS.map(cat => b.expenses_by_category[cat] > 0 && (
+                    <div key={cat} className="flex justify-between text-xs">
+                      <span className={`capitalize font-semibold ${CAT_COLOR[cat]}`}>{cat}</span>
+                      <span className="text-slate-600">৳{b.expenses_by_category[cat].toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-sm border-t border-slate-100 pt-1 mt-1 font-bold text-slate-700">
+                    <span>Total</span><span className="text-rose-500">৳{b.total_expenses.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  </div>
+                </div>
+                {/* Summary */}
+                <div className="space-y-2">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-wide">Summary</p>
+                  <div className="flex justify-between text-sm"><span className="text-slate-500">Revenue</span><span className="font-bold text-sky-600">৳{b.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-slate-500">Expenses</span><span className="font-bold text-rose-500">৳{b.total_expenses.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className={`flex justify-between text-base border-t border-slate-100 pt-2 mt-1 font-black ${b.gross_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    <span>Net Profit</span>
+                    <span>{b.gross_profit >= 0 ? '+' : ''}৳{b.gross_profit.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  </div>
+                  <div className="text-xs text-slate-400 text-right">Margin: {b.profit_margin}%</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      }
     </div>
   );
 }

@@ -1622,6 +1622,91 @@ function ItemsSoldByCategory({ api }) {
 }
 
 // ─── Report Registry ─────────────────────────────────────────────
+// ─── Branch P&L Report ───────────────────────────────────────────
+function BranchPLReport({ api }) {
+  const today = new Date().toISOString().split('T')[0];
+  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(firstOfMonth);
+  const [dateTo, setDateTo] = useState(today);
+  const { data: branchesData } = useQuery('branches-pl-rpt', () => api.get('/branches').then(r => r.data));
+  const [branchId, setBranchId] = useState('');
+  const branches = (branchesData?.branches || []).filter(b => b.is_active);
+  const EXPENSE_CATS = ['rent','utilities','salaries','supplies','maintenance','marketing','other'];
+
+  const { data, isLoading } = useQuery(
+    ['branch-pl-rpt', branchId, dateFrom, dateTo],
+    () => api.get('/branches/pl-report', { params: { branch_id: branchId || undefined, date_from: dateFrom, date_to: dateTo } }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+  const rows = data?.pl || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end">
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">Branch</label>
+          <select value={branchId} onChange={e=>setBranchId(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="">All Branches</option>
+            {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">From</label><input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">To</label><input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+      </div>
+      {isLoading ? <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-2 border-red-500 border-t-transparent rounded-full" /></div> :
+        rows.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">No data for selected period</div> :
+        <div className="space-y-4">
+          {rows.map(b => (
+            <div key={b.branch_id} className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+              <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-7 w-7 rounded bg-gradient-to-br from-sky-400 to-violet-500 flex items-center justify-center text-white font-black text-xs">{b.branch_code}</div>
+                  <span className="font-bold text-gray-800">{b.branch_name}</span>
+                  <span className="text-xs text-gray-400">{b.period.from} → {b.period.to}</span>
+                </div>
+                <div className={`font-black text-base ${b.gross_profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {b.gross_profit >= 0 ? '▲ ' : '▼ '}৳{Math.abs(b.gross_profit).toLocaleString(undefined,{maximumFractionDigits:0})}
+                  <span className="ml-1 text-xs font-semibold opacity-70">{b.profit_margin}% margin</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-0 divide-x divide-gray-50">
+                <div className="p-4 space-y-1.5">
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-2">Revenue</p>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Orders ({b.order_count})</span><span className="font-bold text-gray-800">৳{b.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-xs text-gray-400"><span>Discounts</span><span className="text-red-400">-৳{b.total_discount.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-xs text-gray-400"><span>VAT collected</span><span>৳{b.total_vat.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                </div>
+                <div className="p-4 space-y-1.5">
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-2">Expenses</p>
+                  {EXPENSE_CATS.map(cat => b.expenses_by_category[cat] > 0 && (
+                    <div key={cat} className="flex justify-between text-xs">
+                      <span className="capitalize text-gray-500">{cat}</span>
+                      <span className="text-gray-700">৳{b.expenses_by_category[cat].toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    </div>
+                  ))}
+                  {b.total_expenses === 0 && <div className="text-xs text-gray-400">No expenses recorded</div>}
+                  <div className="flex justify-between text-sm border-t border-gray-100 pt-1 font-bold text-gray-700 mt-1">
+                    <span>Total</span><span className="text-red-500">৳{b.total_expenses.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  </div>
+                </div>
+                <div className="p-4 space-y-1.5">
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-2">Net Result</p>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Revenue</span><span className="font-bold text-sky-600">৳{b.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Expenses</span><span className="font-bold text-red-500">৳{b.total_expenses.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                  <div className={`flex justify-between text-base font-black border-t border-gray-100 pt-2 mt-1 ${b.gross_profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <span>Net Profit</span>
+                    <span>{b.gross_profit >= 0 ? '+' : ''}৳{b.gross_profit.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  </div>
+                  <div className="text-xs text-gray-400 text-right">Margin: {b.profit_margin}%</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      }
+    </div>
+  );
+}
+
 // ─── Branch Summary ──────────────────────────────────────────────
 function BranchSummaryReport({ api }) {
   const today = new Date().toISOString().split('T')[0];
@@ -1736,7 +1821,7 @@ const REPORT_GROUPS = [
   { label:'Financial', items:[{ id:'payment-methods', label:'Payment Methods' },{ id:'vat-report', label:'VAT Report' },{ id:'collection-summary', label:'Collection Report' },{ id:'payment-collection', label:'Payment Collection' },{ id:'discount-report', label:'Discount Report' },{ id:'due-collection', label:'Due Collection' }] },
   { label:'Operations', items:[{ id:'category-sales', label:'Category Sales' },{ id:'items-by-name', label:'Items Sold By Name' },{ id:'items-by-category', label:'Items Sold By Category' },{ id:'delivery-report', label:'Home Delivery' },{ id:'reservation-report', label:'Reservations' }] },
   { label:'Analytics', items:[{ id:'user-summary', label:'User Sales Summary' },{ id:'yearly-summary', label:'Yearly Summary' },{ id:'customer-search', label:'Customer Search' },{ id:'menu-list', label:'Menu List' }] },
-  { label:'Branch', items:[{ id:'branch-summary', label:'Branch Summary' },{ id:'branch-comparison', label:'Branch Comparison' }] },
+  { label:'Branch', items:[{ id:'branch-summary', label:'Branch Summary' },{ id:'branch-comparison', label:'Branch Comparison' },{ id:'branch-pl', label:'P&L Report' }] },
 ];
 const REPORT_COMPONENT = {
   'sales-summary':      DailySalesSummary,
@@ -1759,6 +1844,7 @@ const REPORT_COMPONENT = {
   'menu-list':          MenuListReport,
   'branch-summary':     BranchSummaryReport,
   'branch-comparison':  BranchComparisonReport,
+  'branch-pl':          BranchPLReport,
 };
 
 // ─── Main Reports Page ───────────────────────────────────────────

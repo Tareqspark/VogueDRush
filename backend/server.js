@@ -504,6 +504,35 @@ server.listen(PORT, async () => {
     `);
     console.log('✅ Patch: inventory_transfers table ready');
 
+    await query(`
+      CREATE TABLE IF NOT EXISTS branch_item_prices (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_id INT NOT NULL,
+        food_item_id INT NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        UNIQUE KEY uq_branch_item_price (branch_id, food_item_id),
+        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+        FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('✅ Patch: branch_item_prices table ready');
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS branch_expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_id INT NOT NULL,
+        category ENUM('rent','utilities','salaries','supplies','maintenance','marketing','other') DEFAULT 'other',
+        amount DECIMAL(10,2) NOT NULL,
+        description VARCHAR(255),
+        expense_date DATE NOT NULL,
+        created_by INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id)
+      )
+    `);
+    console.log('✅ Patch: branch_expenses table ready');
+
   } catch (err) {
     console.error('⚠️  Schema patch warning:', err.message);
   }

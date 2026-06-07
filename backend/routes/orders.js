@@ -21,10 +21,9 @@ const generateOrderNumber = () => {
 // C-2 fix: accept an optional `connection` so this can run inside a SERIALIZABLE transaction
 //          using the same connection, avoiding TOCTOU price races.
 // M-2 fix: use global `vat_percentage` from system_settings so the Settings page is effective.
-const calculateOrderTotals = async (items, orderType, connection = null) => {
+const calculateOrderTotals = async (items, orderType, connection = null, branchId = null) => {
   let subtotal = 0;
 
-  // Helper: run a query either on the provided connection (inside a txn) or the pool
   const dbQuery = async (sql, params) => {
     if (connection) {
       const [rows] = await connection.query(sql, params);
@@ -43,7 +42,16 @@ const calculateOrderTotals = async (items, orderType, connection = null) => {
       throw new Error(`Food item ${item.food_item_id} not available`);
     }
 
-    const unitPrice = foodItem.promotional_price || foodItem.price;
+    // Branch-specific price takes priority over promotional price
+    let unitPrice = foodItem.promotional_price || foodItem.price;
+    if (branchId) {
+      const branchPriceRows = await dbQuery(
+        'SELECT price FROM branch_item_prices WHERE food_item_id = ? AND branch_id = ?',
+        [item.food_item_id, branchId]
+      );
+      if (branchPriceRows.length > 0) unitPrice = branchPriceRows[0].price;
+    }
+
     subtotal += unitPrice * item.quantity;
   }
 
@@ -487,7 +495,7 @@ router.post('/backdate', requireRole(['admin']), async (req, res) => {
     const orderBranchId = branch_id || req.headers['x-branch-id'] || 1;
 
     // Calculate totals using existing helper (no connection needed — read-only)
-    const totals = await calculateOrderTotals(items, order_type);
+    const totals = await calculateOrderTotals(items, order_type, null, parseInt(orderBranchId) || null);
     const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
     const adjustedTotal = Math.max(0, totals.total_amount - safeDiscount);
 
@@ -609,8 +617,8 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
         }
       }
       
-      // Calculate totals — pass connection so reads stay inside the SERIALIZABLE transaction (C-2 fix)
-      const totals = await calculateOrderTotals(items, order_type, connection);
+      // Calculate totals — pass connection and branchId so branch pricing is applied
+      const totals = await calculateOrderTotals(items, order_type, connection, parseInt(orderBranchId) || null);
       
       // Insert order
       const orderData = {
