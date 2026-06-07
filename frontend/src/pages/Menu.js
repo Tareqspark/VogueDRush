@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 
 export default function Menu() {
-  const { api } = useAuth();
+  const { api, selectedBranch } = useAuth();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState('items');
   const [search, setSearch] = useState('');
@@ -16,7 +16,7 @@ export default function Menu() {
 
   const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
   const { data: itemsData, isLoading } = useQuery(
-    ['menu-items-admin', catFilter, search],
+    ['menu-items-admin', catFilter, search, selectedBranch?.id],
     () => api.get('/menu/items', { params: { category_id: catFilter || undefined, search: search || undefined } }).then(r => r.data)
   );
 
@@ -47,7 +47,10 @@ export default function Menu() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-800">Menu Management</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Menu Management</h1>
+          {selectedBranch && <p className="text-xs text-violet-600 font-semibold mt-0.5">🏢 {selectedBranch.name} — branch menu only</p>}
+        </div>
         <button
           onClick={() => tab === 'items' ? setShowItemModal('new') : setShowCatModal('new')}
           className="btn btn-primary flex items-center gap-2">

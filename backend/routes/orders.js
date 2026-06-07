@@ -187,42 +187,39 @@ router.get('/', scopeBranch, async (req, res) => {
 // ── Static sub-resource routes MUST come before /:id to avoid param capture ──
 
 // Get order statistics with yesterday comparison for trend indicators (M-12)
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', scopeBranch, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
+    const branchId = req.scopedBranchId;
 
-    let dateFilter = '';
+    const branchFilter = branchId ? `AND branch_id = ${branchId}` : '';
+
+    let dateFilter = `WHERE 1=1 ${branchFilter}`;
     let values = [];
 
     if (start_date && end_date) {
-      dateFilter = 'WHERE DATE(created_at) BETWEEN ? AND ?';
+      dateFilter = `WHERE DATE(created_at) BETWEEN ? AND ? ${branchFilter}`;
       values = [start_date, end_date];
     }
 
     const statusStats = await query(`
-      SELECT status, COUNT(*) as count,
-             SUM(total_amount) as total_revenue
-      FROM orders
-      ${dateFilter}
-      GROUP BY status
+      SELECT status, COUNT(*) as count, SUM(total_amount) as total_revenue
+      FROM orders ${dateFilter} GROUP BY status
     `, values);
 
     const typeStats = await query(`
-      SELECT order_type, COUNT(*) as count,
-             SUM(total_amount) as total_revenue
-      FROM orders
-      ${dateFilter}
-      GROUP BY order_type
+      SELECT order_type, COUNT(*) as count, SUM(total_amount) as total_revenue
+      FROM orders ${dateFilter} GROUP BY order_type
     `, values);
 
     const todayStats = await query(
       `SELECT COUNT(*) as today_orders, COALESCE(SUM(total_amount), 0) as today_revenue
-       FROM orders WHERE DATE(created_at) = CURDATE()`
+       FROM orders WHERE DATE(created_at) = CURDATE() ${branchFilter}`
     );
 
     const yesterdayStats = await query(
       `SELECT COUNT(*) as yesterday_orders, COALESCE(SUM(total_amount), 0) as yesterday_revenue
-       FROM orders WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)`
+       FROM orders WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) ${branchFilter}`
     );
 
     res.json({ statusStats, typeStats, todayStats: todayStats[0], yesterdayStats: yesterdayStats[0] });
@@ -233,7 +230,7 @@ router.get('/stats/overview', async (req, res) => {
 });
 
 // Receipt history (admin management view)
-router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
+router.get('/receipts/history', requireRole(['admin']), scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100, start_date, end_date } = req.query;
     const limitInt = parseInt(limit) || 100;
@@ -241,6 +238,7 @@ router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
     let whereClause = 'o.bill_printed = 1';
     const values = [];
 
+    if (req.scopedBranchId) { whereClause += ' AND o.branch_id = ?'; values.push(req.scopedBranchId); }
     if (start_date) { whereClause += ' AND DATE(o.bill_printed_at) >= ?'; values.push(start_date); }
     if (end_date)   { whereClause += ' AND DATE(o.bill_printed_at) <= ?'; values.push(end_date); }
 
@@ -269,7 +267,7 @@ router.get('/receipts/history', requireRole(['admin']), async (req, res) => {
 });
 
 // Transaction report for admin (cards/mobile wallet details)
-router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
+router.get('/transactions/report', requireRole(['admin']), scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100, start_date, end_date } = req.query;
     const limitInt = parseInt(limit) || 100;
@@ -277,6 +275,7 @@ router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
     let whereClause = "p.status = 'completed'";
     const values = [];
 
+    if (req.scopedBranchId) { whereClause += ' AND o.branch_id = ?'; values.push(req.scopedBranchId); }
     if (start_date) { whereClause += ' AND DATE(p.created_at) >= ?'; values.push(start_date); }
     if (end_date)   { whereClause += ' AND DATE(p.created_at) <= ?'; values.push(end_date); }
 
@@ -300,22 +299,23 @@ router.get('/transactions/report', requireRole(['admin']), async (req, res) => {
 });
 
 // Get all hold orders (pay-later)
-router.get('/hold', async (req, res) => {
+router.get('/hold', scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100 } = req.query;
     const limitInt = Math.min(parseInt(limit) || 100, 200);
     const offsetInt = (parseInt(page) - 1) * limitInt;
+    const branchFilter = req.scopedBranchId ? `AND o.branch_id = ${req.scopedBranchId}` : '';
     const rows = await query(
       `SELECT o.*, u.full_name AS waiter_full_name, t.table_number, t.location AS table_location
        FROM orders o
        LEFT JOIN users u ON u.id = o.waiter_id
        LEFT JOIN tables t ON t.id = o.table_id
-       WHERE o.status = 'hold'
+       WHERE o.status = 'hold' ${branchFilter}
        ORDER BY o.created_at DESC
        LIMIT ? OFFSET ?`,
       [limitInt, offsetInt]
     );
-    const countResult = await query("SELECT COUNT(*) AS total FROM orders WHERE status = 'hold'");
+    const countResult = await query(`SELECT COUNT(*) AS total FROM orders WHERE status = 'hold' ${branchFilter}`);
     res.json({ orders: rows, total: countResult[0].total, page: parseInt(page), limit: limitInt });
   } catch (error) {
     console.error('Get hold orders error:', error);
@@ -324,13 +324,14 @@ router.get('/hold', async (req, res) => {
 });
 
 // Get all cancelled orders
-router.get('/cancelled', requireRole(['admin', 'waiter']), async (req, res) => {
+router.get('/cancelled', requireRole(['admin', 'waiter']), scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100, start_date, end_date } = req.query;
     const limitInt = Math.min(parseInt(limit) || 100, 200);
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = "o.status = 'cancelled'";
     const values = [];
+    if (req.scopedBranchId) { whereClause += ' AND o.branch_id = ?'; values.push(req.scopedBranchId); }
     if (start_date) { whereClause += ' AND DATE(o.created_at) >= ?'; values.push(start_date); }
     if (end_date)   { whereClause += ' AND DATE(o.created_at) <= ?'; values.push(end_date); }
     const rows = await query(
@@ -357,16 +358,17 @@ router.get('/cancelled', requireRole(['admin', 'waiter']), async (req, res) => {
 });
 
 // Get collected amount — payment breakdown by method (cash / card / bKash / Nagad)
-router.get('/collected-amount', requireRole(['admin']), async (req, res) => {
+router.get('/collected-amount', requireRole(['admin']), scopeBranch, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     let dateFilter = '';
     const values = [];
+    const branchJoin = req.scopedBranchId ? `JOIN orders o ON o.id = p.order_id AND o.branch_id = ${req.scopedBranchId}` : '';
     if (start_date) { dateFilter += ' AND DATE(p.created_at) >= ?'; values.push(start_date); }
     if (end_date)   { dateFilter += ' AND DATE(p.created_at) <= ?'; values.push(end_date); }
     const summary = await query(
       `SELECT p.payment_method, COUNT(*) AS count, SUM(p.amount) AS total_amount
-       FROM payments p WHERE p.status = 'completed'${dateFilter}
+       FROM payments p ${branchJoin} WHERE p.status = 'completed'${dateFilter}
        GROUP BY p.payment_method ORDER BY total_amount DESC`,
       values
     );
@@ -1359,7 +1361,7 @@ router.patch('/:id/unlock-bill', validateId, requireRole(['admin']), async (req,
 });
 
 // ── Search orders by food name or table number ─────────────────────────────
-router.get('/search/query', async (req, res) => {
+router.get('/search/query', scopeBranch, async (req, res) => {
   try {
     const { q = '' } = req.query;
     const term = q.trim();

@@ -533,6 +533,32 @@ server.listen(PORT, async () => {
     `);
     console.log('✅ Patch: branch_expenses table ready');
 
+    // Add branch_id to food_items for true menu isolation
+    await query(`ALTER TABLE food_items ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
+    console.log('✅ Patch: food_items.branch_id added');
+
+    // Assign existing branch-less items to branch 1 (the original branch)
+    await query(`UPDATE food_items SET branch_id = 1 WHERE branch_id IS NULL`);
+    console.log('✅ Patch: existing menu items assigned to branch 1');
+
+    // For every other active branch that has zero menu items, clone branch 1 items into it
+    const otherBranches = await query(`
+      SELECT b.id FROM branches b
+      WHERE b.id != 1 AND b.is_active = 1
+        AND NOT EXISTS (SELECT 1 FROM food_items fi WHERE fi.branch_id = b.id LIMIT 1)
+    `);
+    for (const branch of otherBranches) {
+      await query(`
+        INSERT INTO food_items
+          (name, description, price, promotional_price, category_id,
+           preparation_time, is_available, display_order, branch_id, created_at)
+        SELECT name, description, price, promotional_price, category_id,
+               preparation_time, is_available, display_order, ?, NOW()
+        FROM food_items WHERE branch_id = 1
+      `, [branch.id]);
+      console.log(`✅ Patch: menu cloned from branch 1 to branch ${branch.id}`);
+    }
+
   } catch (err) {
     console.error('⚠️  Schema patch warning:', err.message);
   }

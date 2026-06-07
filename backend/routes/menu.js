@@ -1,6 +1,6 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { validateFoodItem, validateFoodCategory, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
@@ -202,7 +202,7 @@ router.delete('/categories/:id', requireRole(['admin']), validateId, async (req,
 });
 
 // Get all food items with optional filtering
-router.get('/items', async (req, res) => {
+router.get('/items', scopeBranch, async (req, res) => {
   try {
     const { 
       category_id, 
@@ -246,9 +246,11 @@ router.get('/items', async (req, res) => {
     
     const { query } = require('../config/database');
 
-    // Apply branch menu override filter when a branch is selected
-    const branchId = req.headers['x-branch-id'] || req.query.branch_id;
+    // True branch isolation: only show items belonging to this branch
+    const branchId = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
     if (branchId) {
+      whereClause += ` AND fi.branch_id = ${parseInt(branchId)}`;
+      // Also apply availability overrides within branch items
       whereClause += ` AND (
         SELECT COALESCE(bmo.is_available, 1)
         FROM branch_menu_overrides bmo
@@ -328,7 +330,7 @@ router.get('/items/:id', validateId, async (req, res) => {
 });
 
 // Create new food item (admin only)
-router.post('/items', requireRole(['admin']), validateFoodItem, async (req, res) => {
+router.post('/items', requireRole(['admin']), scopeBranch, validateFoodItem, async (req, res) => {
   try {
     const { 
       category_id, 
@@ -348,14 +350,19 @@ router.post('/items', requireRole(['admin']), validateFoodItem, async (req, res)
       return res.status(400).json({ error: 'Invalid category' });
     }
     
-    // Check if item name already exists in the same category
-    const existingItem = await findOne('food_items', { category_id, name });
-    if (existingItem) {
-      return res.status(400).json({ error: 'Item name already exists in this category' });
+    // Resolve branch for this item
+    const itemBranchId = req.scopedBranchId || parseInt(req.headers['x-branch-id']) || 1;
+
+    // Check if item name already exists in the same category AND branch
+    const { query } = require('../config/database');
+    const existing = await query('SELECT id FROM food_items WHERE category_id = ? AND name = ? AND branch_id = ?', [category_id, name, itemBranchId]);
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'Item name already exists in this category for this branch' });
     }
-    
+
     const itemData = {
       category_id,
+      branch_id: itemBranchId,
       name,
       description: description || null,
       price: parseFloat(price),
@@ -486,7 +493,7 @@ router.put('/items/:id', requireRole(['admin']), validateId, async (req, res) =>
 });
 
 // Toggle food item availability (admin only)
-router.patch('/items/:id/toggle-availability', requireRole(['admin']), validateId, async (req, res) => {
+router.patch('/items/:id/toggle-availability', requireRole(['admin']), scopeBranch, validateId, async (req, res) => {
   try {
     const { id } = req.params;
     
