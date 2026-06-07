@@ -145,7 +145,8 @@ router.get('/:id', validateId, async (req, res) => {
 // Create new table (admin only)
 router.post('/', requireAdmin, scopeBranch, validateTable, async (req, res) => {
   try {
-    const { table_number, capacity, location } = req.body;
+    const { table_number, location } = req.body;
+    const capacity = parseInt(req.body.capacity) || 4;
     const branchId = req.scopedBranchId || parseInt(req.headers['x-branch-id']) || 1;
 
     // Uniqueness scoped to branch — same number can exist in different branches

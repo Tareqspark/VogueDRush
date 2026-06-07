@@ -148,16 +148,18 @@ const validateFoodCategory = [
 // Table validation
 const validateTable = [
   body('table_number')
-    .isLength({ min: 1, max: 10 })
-    .withMessage('Table number must be between 1 and 10 characters')
+    .isLength({ min: 1, max: 20 })
+    .withMessage('Table number must be between 1 and 20 characters')
     .trim(),
   body('capacity')
-    .isInt({ min: 1, max: 20 })
-    .withMessage('Capacity must be between 1 and 20'),
+    .optional()
+    .customSanitizer(v => parseInt(v) || 4)
+    .isInt({ min: 1, max: 50 })
+    .withMessage('Capacity must be between 1 and 50'),
   body('location')
     .optional()
-    .isLength({ max: 50 })
-    .withMessage('Location must not exceed 50 characters'),
+    .isLength({ max: 100 })
+    .withMessage('Location must not exceed 100 characters'),
   handleValidationErrors
 ];
 
