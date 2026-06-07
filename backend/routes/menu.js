@@ -257,27 +257,28 @@ router.get('/items', scopeBranch, async (req, res) => {
       branchColExists = true;
     } catch (_) {}
 
-    // Apply branch filter using parameterized queries (no string interpolation)
+    // Build branch-specific SQL fragments
+    // branchId is validated as a non-NaN integer so direct interpolation is safe
     let branchJoin = '';
     let branchPriceSelect = '';
 
     if (branchId && !isNaN(branchId)) {
+      // Branch item filter — only show items belonging to this branch
       if (branchColExists) {
-        whereClause += ' AND (fi.branch_id IS NULL OR fi.branch_id = ?)';
-        values.push(branchId);
+        whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${branchId})`;
       }
-      // Availability override — parameterized
+      // Availability override (interpolated integer — safe)
       whereClause += ` AND COALESCE((
         SELECT bmo.is_available FROM branch_menu_overrides bmo
-        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ? LIMIT 1
+        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${branchId} LIMIT 1
       ), 1) = 1`;
-      values.push(branchId);
-
-      // Branch-specific price join
-      branchJoin = 'LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ?';
+      // Branch-specific price join (interpolated integer — safe, no ? placeholder)
+      branchJoin = `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${branchId}`;
       branchPriceSelect = ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price';
     }
 
+    // values array now contains ONLY the non-branch WHERE params (category, availability, search)
+    // LIMIT and OFFSET are appended last — no ordering mismatch possible
     const itemsQuery = `
       SELECT fi.*, fc.name as category_name, fc.icon as category_icon ${branchPriceSelect}
       FROM food_items fi
@@ -288,14 +289,8 @@ router.get('/items', scopeBranch, async (req, res) => {
       LIMIT ? OFFSET ?
     `;
 
-    // Build values for main query (branch price join needs branchId inserted before LIMIT/OFFSET)
-    const itemValues = branchId && !isNaN(branchId)
-      ? [...values, branchId, limitInt, offsetInt]
-      : [...values, limitInt, offsetInt];
+    const items = await query(itemsQuery, [...values, limitInt, offsetInt]);
 
-    const items = await query(itemsQuery, itemValues);
-
-    // Count — no price join needed
     const countQuery = `SELECT COUNT(*) as total FROM food_items fi WHERE ${whereClause}`;
     const countResult = await query(countQuery, values);
     const total = countResult[0].total;
