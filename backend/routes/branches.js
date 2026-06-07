@@ -3,13 +3,10 @@ const router = express.Router();
 const { query, findMany, findOne, insert, update } = require('../config/database');
 const { requireRole, authenticateToken } = require('../middleware/auth');
 
-// GET all branches
+// GET all branches (public — used by branch selector on login)
 router.get('/', async (req, res) => {
   try {
-    const branches = await query(
-      'SELECT * FROM branches ORDER BY id',
-      []
-    );
+    const branches = await query('SELECT * FROM branches ORDER BY id');
     res.json({ branches });
   } catch (error) {
     console.error('Get branches error:', error);
@@ -17,7 +14,44 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET single branch
+// GET all branches WITH stats (admin only) — must be before /:id
+router.get('/all/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const branches = await query('SELECT * FROM branches ORDER BY id');
+    const withStats = await Promise.all(branches.map(async (b) => {
+      const [s] = await query(
+        `SELECT COUNT(*) as total_orders,
+                COALESCE(SUM(total_amount), 0) as total_revenue,
+                COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_orders,
+                COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total_amount END), 0) as today_revenue,
+                COUNT(CASE WHEN status NOT IN ('done','cancelled') THEN 1 END) as active_orders
+         FROM orders WHERE branch_id = ?`, [b.id]
+      );
+      let tableCount = 0;
+      try {
+        const [t] = await query('SELECT COUNT(*) as cnt FROM tables WHERE branch_id = ?', [b.id]);
+        tableCount = t?.cnt || 0;
+      } catch (_) {}
+      return {
+        ...b,
+        stats: {
+          total_orders:  s.total_orders,
+          total_revenue: parseFloat(s.total_revenue),
+          today_orders:  s.today_orders,
+          today_revenue: parseFloat(s.today_revenue),
+          active_orders: s.active_orders,
+          table_count:   tableCount,
+        }
+      };
+    }));
+    res.json({ branches: withStats });
+  } catch (error) {
+    console.error('All branch stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch branches' });
+  }
+});
+
+// GET single branch (must be after all named routes above)
 router.get('/:id', async (req, res) => {
   try {
     const branch = await findOne('branches', { id: req.params.id });
@@ -25,6 +59,44 @@ router.get('/:id', async (req, res) => {
     res.json({ branch });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch branch' });
+  }
+});
+
+// GET single branch stats (admin only)
+router.get('/:id/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const branch = await findOne('branches', { id });
+    if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+    const [totals] = await query(
+      `SELECT COUNT(*) as total_orders,
+              COALESCE(SUM(total_amount), 0) as total_revenue,
+              COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_orders,
+              COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total_amount END), 0) as today_revenue,
+              COUNT(CASE WHEN status NOT IN ('done','cancelled') THEN 1 END) as active_orders
+       FROM orders WHERE branch_id = ?`, [id]
+    );
+    let tableCount = 0;
+    try {
+      const [t] = await query('SELECT COUNT(*) as cnt FROM tables WHERE branch_id = ?', [id]);
+      tableCount = t?.cnt || 0;
+    } catch (_) {}
+
+    res.json({
+      branch,
+      stats: {
+        total_orders:  totals.total_orders,
+        total_revenue: parseFloat(totals.total_revenue),
+        today_orders:  totals.today_orders,
+        today_revenue: parseFloat(totals.today_revenue),
+        active_orders: totals.active_orders,
+        table_count:   tableCount,
+      }
+    });
+  } catch (error) {
+    console.error('Branch stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch branch stats' });
   }
 });
 
@@ -59,10 +131,10 @@ router.put('/:id', authenticateToken, requireRole(['admin']), async (req, res) =
     if (!branch) return res.status(404).json({ error: 'Branch not found' });
 
     await update('branches', {
-      ...(name       !== undefined && { name }),
-      ...(address    !== undefined && { address }),
-      ...(phone      !== undefined && { phone }),
-      ...(is_active  !== undefined && { is_active }),
+      ...(name      !== undefined && { name }),
+      ...(address   !== undefined && { address }),
+      ...(phone     !== undefined && { phone }),
+      ...(is_active !== undefined && { is_active }),
       updated_at: new Date(),
     }, { id: req.params.id });
 
@@ -92,7 +164,6 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
     const branch = await findOne('branches', { id: req.params.id });
     if (!branch) return res.status(404).json({ error: 'Branch not found' });
 
-    // Prevent deleting the last active branch
     const active = await query('SELECT COUNT(*) as cnt FROM branches WHERE is_active = 1');
     if (branch.is_active && active[0].cnt <= 1) {
       return res.status(400).json({ error: 'Cannot delete the last active branch' });
@@ -102,82 +173,6 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
     res.json({ message: 'Branch deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete branch' });
-  }
-});
-
-// GET branch stats (admin only)
-router.get('/:id/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const branch = await findOne('branches', { id });
-    if (!branch) return res.status(404).json({ error: 'Branch not found' });
-
-    const [totals] = await query(
-      `SELECT COUNT(*) as total_orders,
-              COALESCE(SUM(total_amount), 0) as total_revenue,
-              COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_orders,
-              COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total_amount END), 0) as today_revenue,
-              COUNT(CASE WHEN status NOT IN ('done','cancelled') THEN 1 END) as active_orders
-       FROM orders WHERE branch_id = ?`, [id]
-    );
-    const [staffCount] = await query(
-      `SELECT COUNT(*) as staff_count FROM users WHERE is_active = 1`, []
-    );
-    const tableCount = await query(
-      `SELECT COUNT(*) as cnt FROM tables WHERE branch_id = ?`, [id]
-    );
-
-    res.json({
-      branch,
-      stats: {
-        total_orders:   totals.total_orders,
-        total_revenue:  parseFloat(totals.total_revenue),
-        today_orders:   totals.today_orders,
-        today_revenue:  parseFloat(totals.today_revenue),
-        active_orders:  totals.active_orders,
-        table_count:    tableCount[0]?.cnt || 0,
-      }
-    });
-  } catch (error) {
-    console.error('Branch stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch branch stats' });
-  }
-});
-
-// GET all branches with stats (admin only)
-router.get('/all/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
-  try {
-    const branches = await query('SELECT * FROM branches ORDER BY id');
-    const withStats = await Promise.all(branches.map(async (b) => {
-      const [s] = await query(
-        `SELECT COUNT(*) as total_orders,
-                COALESCE(SUM(total_amount), 0) as total_revenue,
-                COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_orders,
-                COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total_amount END), 0) as today_revenue,
-                COUNT(CASE WHEN status NOT IN ('done','cancelled') THEN 1 END) as active_orders
-         FROM orders WHERE branch_id = ?`, [b.id]
-      );
-      let tableCount = 0;
-      try {
-        const [t] = await query('SELECT COUNT(*) as cnt FROM tables WHERE branch_id = ?', [b.id]);
-        tableCount = t?.cnt || 0;
-      } catch (_) { /* branch_id column may not exist on all installs */ }
-      return {
-        ...b,
-        stats: {
-          total_orders:  s.total_orders,
-          total_revenue: parseFloat(s.total_revenue),
-          today_orders:  s.today_orders,
-          today_revenue: parseFloat(s.today_revenue),
-          active_orders: s.active_orders,
-          table_count:   tableCount,
-        }
-      };
-    }));
-    res.json({ branches: withStats });
-  } catch (error) {
-    console.error('All branch stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch branches' });
   }
 });
 
