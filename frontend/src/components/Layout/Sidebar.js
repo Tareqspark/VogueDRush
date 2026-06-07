@@ -41,6 +41,7 @@ import {
   ChatBubbleLeftRightIcon,
   CodeBracketIcon,
   BuildingOfficeIcon,
+  BuildingOffice2Icon,
   CalculatorIcon,
   PauseCircleIcon,
   XCircleIcon,
@@ -65,10 +66,11 @@ const NAV_SECTIONS = [
   {
     label: 'Management',
     items: [
-      { name: 'Menu',     href: '/menu',     icon: BookOpenIcon, roles: ['admin', 'manager'] },
-      { name: 'Users',    href: '/users',    icon: UsersIcon,    roles: ['admin'] },
-      { name: 'Reports',  href: '/reports',  icon: ChartBarIcon, roles: ['admin', 'manager'] },
-      { name: 'Settings', href: '/settings', icon: CogIcon,      roles: ['admin'] },
+      { name: 'Menu',               href: '/menu',     icon: BookOpenIcon,       roles: ['admin', 'manager'] },
+      { name: 'Branch Management',  href: '/branches', icon: BuildingOffice2Icon, roles: ['admin'] },
+      { name: 'Users',              href: '/users',    icon: UsersIcon,          roles: ['admin'] },
+      { name: 'Reports',            href: '/reports',  icon: ChartBarIcon,       roles: ['admin', 'manager'] },
+      { name: 'Settings',           href: '/settings', icon: CogIcon,            roles: ['admin'] },
     ],
   },
   {
@@ -84,7 +86,6 @@ const NAV_SECTIONS = [
       { name: 'QR Ordering',        href: '/qr-ordering',           icon: QrCodeIcon,                  roles: ['admin'] },
       { name: 'Fleet',              href: '/fleet',                 icon: TruckIcon,                   roles: ['admin'] },
       { name: 'Reservations Pro',   href: '/advanced-reservations', icon: CalendarDaysIcon,            roles: ['admin'] },
-      { name: 'Branches',           href: '/branches',              icon: GlobeAltIcon,                roles: ['admin'] },
       { name: 'Business Intel.',    href: '/bi',                    icon: PresentationChartLineIcon,   roles: ['admin'] },
     ],
   },
