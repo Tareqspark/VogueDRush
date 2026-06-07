@@ -39,6 +39,7 @@ const membershipRoutes = require('./routes/membership');
 const complaintsRoutes = require('./routes/complaints');
 const messagingRoutes = require('./routes/messaging');
 const publicApiRoutes = require('./routes/publicapi');
+const inventoryTransfersRoutes = require('./routes/inventoryTransfers');
 
 const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
@@ -415,6 +416,7 @@ app.use('/api/membership', authenticateToken, membershipRoutes);
 app.use('/api/complaints', authenticateToken, complaintsRoutes);
 app.use('/api/messaging', authenticateToken, messagingRoutes);
 app.use('/api/api-ecosystem', authenticateToken, publicApiRoutes);
+app.use('/api/inventory-transfers', inventoryTransfersRoutes);
 
 // 404 handler
 app.use('*', notFound);
@@ -465,6 +467,42 @@ server.listen(PORT, async () => {
       )
     `);
     console.log('✅ Patch: branch_hours table ready');
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS branch_menu_overrides (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_id INT NOT NULL,
+        food_item_id INT NOT NULL,
+        is_available BOOLEAN DEFAULT FALSE,
+        UNIQUE KEY uq_branch_item (branch_id, food_item_id),
+        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+        FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('✅ Patch: branch_menu_overrides table ready');
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS inventory_transfers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        from_branch_id INT NOT NULL,
+        to_branch_id INT NOT NULL,
+        food_item_id INT NOT NULL,
+        quantity DECIMAL(10,2) NOT NULL,
+        unit VARCHAR(20) DEFAULT 'unit',
+        notes TEXT,
+        status ENUM('pending','approved','rejected','completed') DEFAULT 'pending',
+        requested_by INT NOT NULL,
+        approved_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP NULL,
+        FOREIGN KEY (from_branch_id) REFERENCES branches(id),
+        FOREIGN KEY (to_branch_id) REFERENCES branches(id),
+        FOREIGN KEY (food_item_id) REFERENCES food_items(id),
+        FOREIGN KEY (requested_by) REFERENCES users(id),
+        FOREIGN KEY (approved_by) REFERENCES users(id)
+      )
+    `);
+    console.log('✅ Patch: inventory_transfers table ready');
 
   } catch (err) {
     console.error('⚠️  Schema patch warning:', err.message);

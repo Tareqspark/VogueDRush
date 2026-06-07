@@ -245,7 +245,18 @@ router.get('/items', async (req, res) => {
     }
     
     const { query } = require('../config/database');
-    
+
+    // Apply branch menu override filter when a branch is selected
+    const branchId = req.headers['x-branch-id'] || req.query.branch_id;
+    if (branchId) {
+      whereClause += ` AND (
+        SELECT COALESCE(bmo.is_available, 1)
+        FROM branch_menu_overrides bmo
+        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${parseInt(branchId)}
+        LIMIT 1
+      ) = 1`;
+    }
+
     // Get items with category info
     const itemsQuery = `
       SELECT fi.*, fc.name as category_name, fc.icon as category_icon
@@ -255,7 +266,7 @@ router.get('/items', async (req, res) => {
       ORDER BY fc.display_order ASC, fi.display_order ASC, fi.name ASC
       LIMIT ? OFFSET ?
     `;
-    
+
     const items = await query(itemsQuery, [...values, limitInt, offsetInt]);
     
     // Get total count

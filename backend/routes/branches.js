@@ -14,6 +14,49 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET branch menu availability (all items + override status for this branch)
+router.get('/menu/availability', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const branchId = req.query.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'branch_id required' });
+
+    const items = await query(`
+      SELECT fi.id, fi.name, fi.price, fc.name AS category_name,
+             COALESCE(bmo.is_available, 1) AS is_available
+      FROM food_items fi
+      LEFT JOIN food_categories fc ON fc.id = fi.category_id
+      LEFT JOIN branch_menu_overrides bmo ON bmo.food_item_id = fi.id AND bmo.branch_id = ?
+      WHERE fi.is_available = 1
+      ORDER BY fc.name, fi.name
+    `, [branchId]);
+
+    res.json({ items });
+  } catch (err) {
+    console.error('Branch menu error:', err);
+    res.status(500).json({ error: 'Failed to fetch branch menu' });
+  }
+});
+
+// PUT bulk update branch menu availability
+router.put('/menu/availability', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { branch_id, overrides } = req.body;
+    if (!branch_id || !Array.isArray(overrides)) return res.status(400).json({ error: 'branch_id and overrides[] required' });
+
+    for (const o of overrides) {
+      await query(`
+        INSERT INTO branch_menu_overrides (branch_id, food_item_id, is_available)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE is_available = VALUES(is_available)
+      `, [branch_id, o.food_item_id, o.is_available ? 1 : 0]);
+    }
+    res.json({ message: 'Menu availability updated' });
+  } catch (err) {
+    console.error('Update menu override error:', err);
+    res.status(500).json({ error: 'Failed to update menu availability' });
+  }
+});
+
 // GET all branches WITH stats (admin only) — must be before /:id
 router.get('/all/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
