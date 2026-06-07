@@ -115,15 +115,19 @@ const ProtectedRoute = ({ children, requiredRole }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (requiredRole && user.role !== requiredRole) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 50%, #FEF9C3 100%)' }}>
-        <div className="text-center p-8 bg-white rounded-2xl shadow-card">
-          <h1 className="text-xl font-bold text-slate-800 mb-2">Access Denied</h1>
-          <p className="text-slate-500">You don't have permission to access this page.</p>
+  // requiredRole can be a string or an array of strings
+  if (requiredRole) {
+    const allowed = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    if (!allowed.includes(user.role)) {
+      return (
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 50%, #FEF9C3 100%)' }}>
+          <div className="text-center p-8 bg-white rounded-2xl shadow-card">
+            <h1 className="text-xl font-bold text-slate-800 mb-2">Access Denied</h1>
+            <p className="text-slate-500">You don't have permission to access this page.</p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   }
 
   return children;
@@ -328,7 +332,7 @@ const AppContent = () => {
 
                   <Route path="/hold-orders" element={<ProtectedRoute><Layout><HoldOrders /></Layout></ProtectedRoute>} />
                   <Route path="/cancelled-orders" element={<ProtectedRoute><Layout><CancelledOrders /></Layout></ProtectedRoute>} />
-                  <Route path="/collected-amount" element={<ProtectedRoute requiredRole="admin"><Layout><CollectedAmount /></Layout></ProtectedRoute>} />
+                  <Route path="/collected-amount" element={<ProtectedRoute requiredRole={['admin', 'manager']}><Layout><CollectedAmount /></Layout></ProtectedRoute>} />
 
                   {/* Kitchen - accessible to all roles */}
                   <Route
@@ -354,11 +358,11 @@ const AppContent = () => {
                     }
                   />
 
-                  {/* Menu - admin only */}
+                  {/* Menu - admin and manager */}
                   <Route
                     path="/menu"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Menu />
                         </Layout>
@@ -402,11 +406,11 @@ const AppContent = () => {
                     }
                   />
 
-                  {/* Reports - admin only */}
+                  {/* Reports - admin and manager */}
                   <Route
                     path="/reports"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Reports />
                         </Layout>
@@ -566,7 +570,7 @@ const AppContent = () => {
                   <Route
                     path="/branches/*"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Branches />
                         </Layout>

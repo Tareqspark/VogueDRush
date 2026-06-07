@@ -67,7 +67,7 @@ const NAV_SECTIONS = [
     label: 'Management',
     items: [
       { name: 'Menu',               href: '/menu',     icon: BookOpenIcon,       roles: ['admin', 'manager'] },
-      { name: 'Branch Management',  href: '/branches', icon: BuildingOffice2Icon, roles: ['admin'] },
+      { name: 'Branch Management',  href: '/branches', icon: BuildingOffice2Icon, roles: ['admin', 'manager'] },
       { name: 'Users',              href: '/users',    icon: UsersIcon,          roles: ['admin'] },
       { name: 'Reports',            href: '/reports',  icon: ChartBarIcon,       roles: ['admin', 'manager'] },
       { name: 'Settings',           href: '/settings', icon: CogIcon,            roles: ['admin'] },
@@ -117,9 +117,10 @@ const NAV_SECTIONS = [
 ];
 
 const ROLE_COLORS = {
-  admin:   { bg: 'bg-sky-100',    text: 'text-sky-700' },
-  waiter:  { bg: 'bg-amber-100',  text: 'text-amber-700' },
-  kitchen: { bg: 'bg-emerald-100',text: 'text-emerald-700' },
+  admin:   { bg: 'bg-sky-100',     text: 'text-sky-700' },
+  manager: { bg: 'bg-violet-100',  text: 'text-violet-700' },
+  waiter:  { bg: 'bg-amber-100',   text: 'text-amber-700' },
+  kitchen: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 };
 
 const Sidebar = ({ isOpen, onClose }) => {

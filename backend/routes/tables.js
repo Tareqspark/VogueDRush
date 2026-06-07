@@ -143,7 +143,7 @@ router.get('/:id', validateId, async (req, res) => {
 });
 
 // Create new table (admin only)
-router.post('/', requireAdmin, scopeBranch, validateTable, async (req, res) => {
+router.post('/', requireRole(['admin', 'manager']), scopeBranch, validateTable, async (req, res) => {
   try {
     const { table_number, location } = req.body;
     const capacity = parseInt(req.body.capacity) || 4;
@@ -192,7 +192,7 @@ router.post('/', requireAdmin, scopeBranch, validateTable, async (req, res) => {
 });
 
 // Update table (admin only)
-router.put('/:id', requireAdmin, validateId, async (req, res) => {
+router.put('/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { table_number, capacity, location, status } = req.body;
@@ -344,7 +344,7 @@ router.patch('/:id/status', validateId, async (req, res) => {
 });
 
 // Delete table (admin only)
-router.delete('/:id', requireAdmin, validateId, async (req, res) => {
+router.delete('/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     

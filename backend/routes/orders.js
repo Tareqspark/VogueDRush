@@ -230,7 +230,7 @@ router.get('/stats/overview', scopeBranch, async (req, res) => {
 });
 
 // Receipt history (admin management view)
-router.get('/receipts/history', requireRole(['admin']), scopeBranch, async (req, res) => {
+router.get('/receipts/history', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100, start_date, end_date } = req.query;
     const limitInt = parseInt(limit) || 100;
@@ -267,7 +267,7 @@ router.get('/receipts/history', requireRole(['admin']), scopeBranch, async (req,
 });
 
 // Transaction report for admin (cards/mobile wallet details)
-router.get('/transactions/report', requireRole(['admin']), scopeBranch, async (req, res) => {
+router.get('/transactions/report', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100, start_date, end_date } = req.query;
     const limitInt = parseInt(limit) || 100;
@@ -358,7 +358,7 @@ router.get('/cancelled', requireRole(['admin', 'waiter']), scopeBranch, async (r
 });
 
 // Get collected amount — payment breakdown by method (cash / card / bKash / Nagad)
-router.get('/collected-amount', requireRole(['admin']), scopeBranch, async (req, res) => {
+router.get('/collected-amount', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     let dateFilter = '';
@@ -463,7 +463,7 @@ router.get('/:id', validateId, async (req, res) => {
 });
 
 // ── Backdated order entry (admin only) ────────────────────────────────────────
-router.post('/backdate', requireRole(['admin']), async (req, res) => {
+router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const {
       backdated_at,
@@ -1321,7 +1321,7 @@ router.post('/:id/bill', validateId, async (req, res) => {
 });
 
 // M-11: Admin unlock — clears the bill_printed flag so an accidentally printed bill can be corrected
-router.patch('/:id/unlock-bill', validateId, requireRole(['admin']), async (req, res) => {
+router.patch('/:id/unlock-bill', validateId, requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const order = await findOne('orders', { id });

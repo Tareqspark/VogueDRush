@@ -52,7 +52,7 @@ router.get('/categories/:id', validateId, async (req, res) => {
 });
 
 // Create new food category (admin only)
-router.post('/categories', requireRole(['admin']), validateFoodCategory, async (req, res) => {
+router.post('/categories', requireRole(['admin', 'manager']), validateFoodCategory, async (req, res) => {
   try {
     const { name, description, icon, display_order } = req.body;
     
@@ -96,7 +96,7 @@ router.post('/categories', requireRole(['admin']), validateFoodCategory, async (
 });
 
 // Update food category (admin only)
-router.put('/categories/:id', requireRole(['admin']), validateId, async (req, res) => {
+router.put('/categories/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description, icon, display_order, is_active } = req.body;
@@ -154,7 +154,7 @@ router.put('/categories/:id', requireRole(['admin']), validateId, async (req, re
 });
 
 // Delete food category (admin only)
-router.delete('/categories/:id', requireRole(['admin']), validateId, async (req, res) => {
+router.delete('/categories/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -337,7 +337,7 @@ router.get('/items/:id', validateId, async (req, res) => {
 });
 
 // Create new food item (admin only)
-router.post('/items', requireRole(['admin']), scopeBranch, validateFoodItem, async (req, res) => {
+router.post('/items', requireRole(['admin', 'manager']), scopeBranch, validateFoodItem, async (req, res) => {
   try {
     const { 
       category_id, 
@@ -421,7 +421,7 @@ router.post('/items', requireRole(['admin']), scopeBranch, validateFoodItem, asy
 });
 
 // Update food item (admin only)
-router.put('/items/:id', requireRole(['admin']), validateId, async (req, res) => {
+router.put('/items/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { 
@@ -514,7 +514,7 @@ router.put('/items/:id', requireRole(['admin']), validateId, async (req, res) =>
 });
 
 // Toggle food item availability (admin only)
-router.patch('/items/:id/toggle-availability', requireRole(['admin']), scopeBranch, validateId, async (req, res) => {
+router.patch('/items/:id/toggle-availability', requireRole(['admin', 'manager']), scopeBranch, validateId, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -555,7 +555,7 @@ router.patch('/items/:id/toggle-availability', requireRole(['admin']), scopeBran
 });
 
 // Delete food item (admin only)
-router.delete('/items/:id', requireRole(['admin']), validateId, async (req, res) => {
+router.delete('/items/:id', requireRole(['admin', 'manager']), validateId, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -605,7 +605,7 @@ router.delete('/items/:id', requireRole(['admin']), validateId, async (req, res)
 });
 
 // Get menu statistics (admin only)
-router.get('/stats/overview', requireRole(['admin']), async (req, res) => {
+router.get('/stats/overview', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { query } = require('../config/database');
     
