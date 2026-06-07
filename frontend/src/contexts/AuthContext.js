@@ -267,6 +267,18 @@ export const AuthProvider = ({ children }) => {
           type: AUTH_ACTIONS.LOGIN_SUCCESS,
           payload: { user, accessToken, refreshToken: newRefresh, sessionToken: newSession },
         });
+
+        // Re-auto-select branch on refresh if user has an assigned branch but localStorage was cleared
+        if (user.branch_id && !localStorage.getItem('selectedBranch')) {
+          try {
+            const base = typeof window !== 'undefined' ? `${window.location.origin}/api` : '/api';
+            const br = await fetch(`${base}/branches/${user.branch_id}`).then(r => r.json());
+            if (br.branch) {
+              localStorage.setItem('selectedBranch', JSON.stringify(br.branch));
+              dispatch({ type: AUTH_ACTIONS.SELECT_BRANCH, payload: br.branch });
+            }
+          } catch (_) {}
+        }
       } catch {
         // No valid session — clear any stale user data and go to login
         localStorage.removeItem('user');

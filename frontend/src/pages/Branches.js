@@ -19,7 +19,8 @@ const StatPill = ({ label, value, color = 'slate' }) => (
 );
 
 export default function Branches() {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -65,8 +66,14 @@ export default function Branches() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-black text-slate-800">Branch Management</h1>
-          <p className="text-slate-500 text-sm">{branches.length} branch{branches.length !== 1 ? 'es' : ''} configured</p>
+          <h1 className="text-xl font-black text-slate-800">
+            {isAdmin ? 'Branch Management' : 'My Branch'}
+          </h1>
+          <p className="text-slate-500 text-sm">
+            {isAdmin
+              ? `${branches.length} branch${branches.length !== 1 ? 'es' : ''} configured`
+              : branches[0]?.name || 'Branch settings'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => { setShowPL(p => !p); setShowExpenses(false); setShowTransfers(false); }} className="btn btn-secondary">
@@ -75,32 +82,38 @@ export default function Branches() {
           <button onClick={() => { setShowExpenses(e => !e); setShowPL(false); setShowTransfers(false); }} className="btn btn-secondary">
             <CurrencyDollarIcon className="h-4 w-4" /> Expenses
           </button>
-          <button onClick={() => { setShowTransfers(t => !t); setShowPL(false); setShowExpenses(false); }} className="btn btn-secondary">
-            <ArrowsRightLeftIcon className="h-4 w-4" /> Transfers
-          </button>
-          <button onClick={() => { setEditing(null); setShowForm(true); }} className="btn btn-primary">
-            <PlusIcon className="h-4 w-4" /> Add Branch
-          </button>
+          {isAdmin && (
+            <>
+              <button onClick={() => { setShowTransfers(t => !t); setShowPL(false); setShowExpenses(false); }} className="btn btn-secondary">
+                <ArrowsRightLeftIcon className="h-4 w-4" /> Transfers
+              </button>
+              <button onClick={() => { setEditing(null); setShowForm(true); }} className="btn btn-primary">
+                <PlusIcon className="h-4 w-4" /> Add Branch
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="card p-4 text-center">
-          <div className="text-3xl font-black text-sky-600">{branches.length}</div>
-          <div className="text-xs text-slate-500 font-medium mt-0.5">Total Branches</div>
-        </div>
-        <div className="card p-4 text-center">
-          <div className="text-3xl font-black text-emerald-600">{branches.filter(b => b.is_active).length}</div>
-          <div className="text-xs text-slate-500 font-medium mt-0.5">Active</div>
-        </div>
-        <div className="card p-4 text-center">
-          <div className="text-3xl font-black text-sky-600">
-            ৳{branches.reduce((s, b) => s + (b.stats?.today_revenue || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+      {/* Summary cards — admin sees network totals; manager sees their own branch */}
+      {isAdmin && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="card p-4 text-center">
+            <div className="text-3xl font-black text-sky-600">{branches.length}</div>
+            <div className="text-xs text-slate-500 font-medium mt-0.5">Total Branches</div>
           </div>
-          <div className="text-xs text-slate-500 font-medium mt-0.5">Today's Revenue (All)</div>
+          <div className="card p-4 text-center">
+            <div className="text-3xl font-black text-emerald-600">{branches.filter(b => b.is_active).length}</div>
+            <div className="text-xs text-slate-500 font-medium mt-0.5">Active</div>
+          </div>
+          <div className="card p-4 text-center">
+            <div className="text-3xl font-black text-sky-600">
+              ৳{branches.reduce((s, b) => s + (b.stats?.today_revenue || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-xs text-slate-500 font-medium mt-0.5">Today's Revenue (All)</div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Branch list */}
       {isLoading ? (
@@ -134,14 +147,16 @@ export default function Branches() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => { setEditing(branch); setShowForm(true); }}
-                    className="btn btn-secondary btn-sm"
-                    title="Edit"
-                  >
-                    <PencilSquareIcon className="h-4 w-4" />
-                  </button>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setEditing(branch); setShowForm(true); }}
+                      className="btn btn-secondary btn-sm"
+                      title="Edit"
+                    >
+                      <PencilSquareIcon className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => setHoursOpen(hoursOpen === branch.id ? null : branch.id)}
                     className="btn btn-sm bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
@@ -166,21 +181,25 @@ export default function Branches() {
                     Pricing
                     {pricingOpen === branch.id ? <ChevronUpIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
                   </button>
-                  <button
-                    onClick={() => handleToggle(branch)}
-                    className={`btn btn-sm ${branch.is_active ? 'bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
-                    title={branch.is_active ? 'Deactivate' : 'Activate'}
-                  >
-                    {branch.is_active ? <XCircleIcon className="h-4 w-4" /> : <CheckCircleIcon className="h-4 w-4" />}
-                    {branch.is_active ? 'Deactivate' : 'Activate'}
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(branch)}
-                    className="btn btn-sm bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
-                    title="Delete"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => handleToggle(branch)}
+                        className={`btn btn-sm ${branch.is_active ? 'bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
+                        title={branch.is_active ? 'Deactivate' : 'Activate'}
+                      >
+                        {branch.is_active ? <XCircleIcon className="h-4 w-4" /> : <CheckCircleIcon className="h-4 w-4" />}
+                        {branch.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(branch)}
+                        className="btn btn-sm bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
+                        title="Delete"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

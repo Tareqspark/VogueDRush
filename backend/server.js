@@ -555,27 +555,7 @@ server.listen(PORT, async () => {
       FOREIGN KEY (approved_by) REFERENCES users(id)
     )`);
 
-  // Clone branch 1 menu into any new branch that has no items yet
-  try {
-    const otherBranches = await query(`
-      SELECT b.id FROM branches b
-      WHERE b.id != 1 AND b.is_active = 1
-        AND NOT EXISTS (SELECT 1 FROM food_items fi WHERE fi.branch_id = b.id LIMIT 1)
-    `);
-    for (const branch of otherBranches) {
-      await query(`
-        INSERT INTO food_items
-          (name, description, price, promotional_price, category_id,
-           preparation_time, is_available, display_order, branch_id, created_at)
-        SELECT name, description, price, promotional_price, category_id,
-               preparation_time, is_available, display_order, ?, NOW()
-        FROM food_items WHERE branch_id = 1
-      `, [branch.id]);
-      console.log(`✅ Patch: menu cloned from branch 1 to branch ${branch.id}`);
-    }
-  } catch (e) {
-    console.error('⚠️  Menu clone patch failed:', e.message);
-  }
+  // Each branch owns its own menu — no cross-branch cloning.
 });
 
 module.exports = { app, server, io };

@@ -246,26 +246,17 @@ router.get('/items', scopeBranch, async (req, res) => {
     
     const { query } = require('../config/database');
 
-    // Resolve numeric branch ID safely
+    // Resolve numeric branch ID — each branch is a completely independent store
     const rawBranch = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
     const branchId = rawBranch ? parseInt(rawBranch) : null;
     const validBranchId = branchId && !isNaN(branchId) ? branchId : null;
 
-    // Check if branch_id column exists (safe — column added via server startup patch)
-    let branchColExists = false;
+    // Strict branch isolation: only return items that belong to this exact branch.
+    // No fallback to global/null items — each branch owns its own menu.
     if (validBranchId) {
-      try {
-        await query('SELECT branch_id FROM food_items LIMIT 0');
-        branchColExists = true;
-      } catch (_) {}
+      whereClause += ` AND fi.branch_id = ${validBranchId}`;
     }
 
-    // Apply branch filter — only if column exists and we have a valid branch
-    if (validBranchId && branchColExists) {
-      whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${validBranchId})`;
-    }
-
-    // Branch-specific price join — safe integer interpolation, no ? placeholder
     const branchJoin = validBranchId
       ? `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${validBranchId}`
       : '';
@@ -373,17 +364,9 @@ router.post('/items', requireRole(['admin', 'manager']), scopeBranch, validateFo
       }
     } catch (_) {}
 
-    // Build item data — include branch_id only if the column exists
-    let hasBranchCol = true;
-    try {
-      await query('SELECT branch_id FROM food_items LIMIT 0');
-    } catch (_) {
-      hasBranchCol = false;
-    }
-
     const itemData = {
       category_id,
-      ...(hasBranchCol && { branch_id: itemBranchId }),
+      branch_id: itemBranchId,
       name,
       description: description || null,
       price: parseFloat(price),

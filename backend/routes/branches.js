@@ -107,10 +107,13 @@ router.put('/menu/availability', authenticateToken, requireRole(['admin']), asyn
   }
 });
 
-// GET all branches WITH stats (admin only) — must be before /:id
-router.get('/all/stats', authenticateToken, requireRole(['admin']), async (req, res) => {
+// GET branches with stats — admin sees all; manager sees only their own branch
+router.get('/all/stats', authenticateToken, requireRole(['admin', 'manager']), async (req, res) => {
   try {
-    const branches = await query('SELECT * FROM branches ORDER BY id');
+    const isManager = req.user.role === 'manager';
+    const branches = isManager
+      ? await query('SELECT * FROM branches WHERE id = ?', [req.user.branch_id])
+      : await query('SELECT * FROM branches ORDER BY id');
     const withStats = await Promise.all(branches.map(async (b) => {
       const [s] = await query(
         `SELECT COUNT(*) as total_orders,
