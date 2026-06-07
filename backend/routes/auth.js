@@ -44,10 +44,11 @@ router.post('/login', rateLimiters.auth, async (req, res) => {
     };
     
     // Generate tokens with session management
-    const tokens = await generateTokens({ 
-      id: user.id, 
-      username: user.username, 
-      role: user.role 
+    const tokens = await generateTokens({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      branch_id: user.branch_id || null,
     }, deviceInfo);
     
     // Remove sensitive data

@@ -1,6 +1,6 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove, transaction, transactionWithIsolation, query } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { validateOrder, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
@@ -74,7 +74,7 @@ const calculateOrderTotals = async (items, orderType, connection = null) => {
 };
 
 // Get all orders with filtering and pagination
-router.get('/', async (req, res) => {
+router.get('/', scopeBranch, async (req, res) => {
   try {
     const {
       page = 1,
@@ -88,16 +88,16 @@ router.get('/', async (req, res) => {
       branch_id,
     } = req.query;
 
-    const limitInt = Math.min(parseInt(limit) || 50, 200); // M-4: cap at 200 to prevent full-table scans
+    const limitInt = Math.min(parseInt(limit) || 50, 200);
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
 
-    // Branch filter — passed from frontend session
-    const branchFilter = branch_id || req.headers['x-branch-id'];
-    if (branchFilter) {
+    // scopedBranchId wins over query param — staff always locked to their branch
+    const effectiveBranch = req.scopedBranchId ?? (branch_id ? parseInt(branch_id) : null);
+    if (effectiveBranch) {
       whereClause += ' AND o.branch_id = ?';
-      values.push(parseInt(branchFilter));
+      values.push(effectiveBranch);
     }
 
     if (status) {

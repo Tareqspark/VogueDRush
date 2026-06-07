@@ -1,29 +1,34 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove, query } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
 // Get kitchen queue with advanced filtering and priority sorting
-router.get('/', async (req, res) => {
+router.get('/', scopeBranch, async (req, res) => {
   try {
-    const { 
-      status, 
-      priority, 
+    const {
+      status,
+      priority,
       order_id,
-      page = 1, 
+      page = 1,
       limit = 100,
       sort_by = 'priority_created',
       filter_overdue = 'false'
     } = req.query;
-    
+
     const limitInt = parseInt(limit) || 50;
     const offsetInt = (parseInt(page) - 1) * limitInt;
     // Never show items belonging to held orders in the kitchen
     let whereClause = "o.status != 'hold'";
     let values = [];
+
+    if (req.scopedBranchId) {
+      whereClause += ' AND o.branch_id = ?';
+      values.push(req.scopedBranchId);
+    }
     
     if (status) {
       whereClause += ' AND kq.status = ?';

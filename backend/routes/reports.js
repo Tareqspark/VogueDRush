@@ -1211,4 +1211,120 @@ router.get('/daily-sales-detail', validateDateRange, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Branch summary report ─────────────────────────────────────────────────────
+router.get('/branch-summary', requireRole(['admin', 'manager']), async (req, res) => {
+  try {
+    const { branch_id, date_from, date_to } = req.query;
+
+    let dateWhere = '';
+    const values = [];
+
+    if (date_from) { dateWhere += ' AND DATE(o.created_at) >= ?'; values.push(date_from); }
+    if (date_to)   { dateWhere += ' AND DATE(o.created_at) <= ?'; values.push(date_to); }
+
+    // Determine which branches to include
+    const targetBranchId = req.user?.branch_id || (branch_id ? parseInt(branch_id) : null);
+
+    let branchWhere = '';
+    if (targetBranchId) {
+      branchWhere = ' AND o.branch_id = ?';
+      values.push(targetBranchId);
+    }
+
+    const summary = await query(`
+      SELECT
+        b.id AS branch_id, b.name AS branch_name, b.code AS branch_code,
+        COUNT(o.id) AS total_orders,
+        COALESCE(SUM(o.total_amount), 0) AS total_revenue,
+        COALESCE(AVG(o.total_amount), 0) AS avg_order_value,
+        COUNT(CASE WHEN o.status = 'done' THEN 1 END) AS completed_orders,
+        COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) AS cancelled_orders,
+        COALESCE(SUM(o.discount_amount), 0) AS total_discount,
+        COUNT(CASE WHEN o.order_type = 'dine_in' THEN 1 END) AS dine_in_orders,
+        COUNT(CASE WHEN o.order_type = 'delivery' THEN 1 END) AS delivery_orders,
+        COUNT(CASE WHEN o.order_type = 'direct' THEN 1 END) AS takeaway_orders
+      FROM branches b
+      LEFT JOIN orders o ON o.branch_id = b.id AND o.status != 'cancelled' ${dateWhere} ${branchWhere}
+      WHERE b.is_active = 1
+      GROUP BY b.id, b.name, b.code
+      ORDER BY total_revenue DESC
+    `, values);
+
+    // Top items per branch
+    const topItems = await query(`
+      SELECT o.branch_id, fi.name AS item_name,
+             SUM(oi.quantity) AS qty, COALESCE(SUM(oi.total_price), 0) AS revenue
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN food_items fi ON fi.id = oi.food_item_id
+      WHERE o.status = 'done' ${date_from ? 'AND DATE(o.created_at) >= ?' : ''} ${date_to ? 'AND DATE(o.created_at) <= ?' : ''}
+      ${targetBranchId ? 'AND o.branch_id = ?' : ''}
+      GROUP BY o.branch_id, oi.food_item_id
+      ORDER BY qty DESC
+    `, [
+      ...(date_from ? [date_from] : []),
+      ...(date_to ? [date_to] : []),
+      ...(targetBranchId ? [targetBranchId] : []),
+    ]);
+
+    // Group top items by branch
+    const topItemsByBranch = {};
+    topItems.forEach(row => {
+      if (!topItemsByBranch[row.branch_id]) topItemsByBranch[row.branch_id] = [];
+      if (topItemsByBranch[row.branch_id].length < 5) topItemsByBranch[row.branch_id].push(row);
+    });
+
+    res.json({
+      summary: summary.map(b => ({
+        ...b,
+        total_revenue: parseFloat(b.total_revenue),
+        avg_order_value: parseFloat(b.avg_order_value),
+        total_discount: parseFloat(b.total_discount),
+        top_items: topItemsByBranch[b.branch_id] || [],
+      }))
+    });
+  } catch (err) {
+    console.error('Branch summary error:', err);
+    res.status(500).json({ error: 'Failed to fetch branch summary' });
+  }
+});
+
+// ── Branch comparison (admin only) ───────────────────────────────────────────
+router.get('/branch-comparison', requireRole(['admin']), async (req, res) => {
+  try {
+    const { date_from, date_to } = req.query;
+    const values = [];
+    let dateWhere = '';
+    if (date_from) { dateWhere += ' AND DATE(o.created_at) >= ?'; values.push(date_from); }
+    if (date_to)   { dateWhere += ' AND DATE(o.created_at) <= ?'; values.push(date_to); }
+
+    const rows = await query(`
+      SELECT
+        b.id, b.name, b.code,
+        COUNT(o.id) AS orders,
+        COALESCE(SUM(CASE WHEN o.status = 'done' THEN o.total_amount END), 0) AS revenue,
+        COALESCE(AVG(CASE WHEN o.status = 'done' THEN o.total_amount END), 0) AS avg_check,
+        COUNT(CASE WHEN DATE(o.created_at) = CURDATE() THEN 1 END) AS today_orders,
+        COALESCE(SUM(CASE WHEN DATE(o.created_at) = CURDATE() AND o.status = 'done' THEN o.total_amount END), 0) AS today_revenue
+      FROM branches b
+      LEFT JOIN orders o ON o.branch_id = b.id ${dateWhere}
+      WHERE b.is_active = 1
+      GROUP BY b.id, b.name, b.code
+      ORDER BY revenue DESC
+    `, values);
+
+    res.json({
+      comparison: rows.map(r => ({
+        ...r,
+        revenue: parseFloat(r.revenue),
+        avg_check: parseFloat(r.avg_check),
+        today_revenue: parseFloat(r.today_revenue),
+      }))
+    });
+  } catch (err) {
+    console.error('Branch comparison error:', err);
+    res.status(500).json({ error: 'Failed to fetch branch comparison' });
+  }
+});
+
 module.exports = router;

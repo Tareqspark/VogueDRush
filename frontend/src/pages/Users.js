@@ -149,6 +149,11 @@ export default function Users() {
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold capitalize ${ROLE_STYLES[user.role] || ROLE_STYLES.waiter}`}>
                     {user.role}
                   </span>
+                  {user.branch_name && (
+                    <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-semibold">
+                      🏢 {user.branch_name}
+                    </span>
+                  )}
                   {!user.is_active && (
                     <span className="text-xs bg-rose-50 text-rose-600 border border-rose-200 px-2 py-0.5 rounded-full font-semibold">Inactive</span>
                   )}
@@ -227,11 +232,15 @@ function UserFormModal({ api, user, onClose, onSaved }) {
     full_name: user?.full_name || '',
     phone:     user?.phone     || '',
     role:      user?.role      || 'waiter',
+    branch_id: user?.branch_id || '',
     password:  '',
     is_active: user ? !!user.is_active : true,
   });
   const [saving, setSaving] = useState(false);
   const f = k => ({ value: form[k], onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) });
+
+  const { data: branchesData } = useQuery('branches-list', () => api.get('/branches').then(r => r.data));
+  const branches = (branchesData?.branches || []).filter(b => b.is_active);
 
   const save = async (e) => {
     e.preventDefault();
@@ -286,7 +295,7 @@ function UserFormModal({ api, user, onClose, onSaved }) {
             </div>
             <div>
               <label className="label">Role *</label>
-              <select className="select" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
+              <select className="select" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value, branch_id: e.target.value === 'admin' ? '' : p.branch_id }))}>
                 <option value="waiter">Waiter</option>
                 <option value="kitchen">Kitchen</option>
                 <option value="manager">Manager</option>
@@ -294,6 +303,18 @@ function UserFormModal({ api, user, onClose, onSaved }) {
               </select>
             </div>
           </div>
+          {form.role !== 'admin' && (
+            <div>
+              <label className="label">Assigned Branch</label>
+              <select className="select" value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}>
+                <option value="">All Branches (no restriction)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Staff assigned to a branch can only see that branch's data.</p>
+            </div>
+          )}
           <div>
             <label className="label">{user ? 'New Password (leave blank to keep)' : 'Password *'}</label>
             <input className="input" type="password" {...f('password')}
@@ -306,7 +327,7 @@ function UserFormModal({ api, user, onClose, onSaved }) {
             <label htmlFor="is_active_chk" className="text-sm text-slate-600">Account active</label>
           </div>
           <div className="bg-sky-50 rounded-xl p-3 text-xs text-sky-700">
-            <strong>Role guide:</strong> Waiter → orders/tables only · Manager → most features, no user management · Admin → full access
+            <strong>Role guide:</strong> Waiter → orders/tables only · Manager → most features, no user management · Admin → full access, all branches
           </div>
           <button type="submit" disabled={saving} className="btn btn-primary w-full justify-center">
             {saving ? <LoadingSpinner size="sm" /> : (user ? 'Update User' : 'Create User')}

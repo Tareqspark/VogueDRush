@@ -293,6 +293,18 @@ export const AuthProvider = ({ children }) => {
         payload: { user, accessToken, refreshToken, sessionToken },
       });
 
+      // Auto-select branch for staff assigned to a specific branch
+      if (user.branch_id) {
+        try {
+          const base = typeof window !== 'undefined' ? `${window.location.origin}/api` : '/api';
+          const br = await fetch(`${base}/branches/${user.branch_id}`).then(r => r.json());
+          if (br.branch) {
+            localStorage.setItem('selectedBranch', JSON.stringify(br.branch));
+            dispatch({ type: AUTH_ACTIONS.SELECT_BRANCH, payload: br.branch });
+          }
+        } catch (_) {}
+      }
+
       toast.success(`Welcome back, ${user.full_name}!`);
       return { success: true };
     } catch (error) {

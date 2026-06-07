@@ -1,26 +1,25 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove, query } = require('../config/database');
-const { requireRole, requireAdmin } = require('../middleware/auth');
+const { requireRole, requireAdmin, scopeBranch } = require('../middleware/auth');
 const { validateTable, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
 // Get all tables with optional filtering
-router.get('/', async (req, res) => {
+router.get('/', scopeBranch, async (req, res) => {
   try {
     const { status, location, page = 1, limit = 100, branch_id } = req.query;
-    // M-4: cap limit to prevent full-table scans
     const limitInt = Math.min(parseInt(limit) || 100, 500);
     const offsetInt = (parseInt(page) - 1) * limitInt;
 
     let whereClause = '1=1';
     let values = [];
 
-    const branchFilter = branch_id || req.headers['x-branch-id'];
-    if (branchFilter) {
+    const effectiveBranch = req.scopedBranchId ?? (branch_id ? parseInt(branch_id) : null);
+    if (effectiveBranch) {
       whereClause += ' AND branch_id = ?';
-      values.push(parseInt(branchFilter));
+      values.push(effectiveBranch);
     }
 
     if (status) {

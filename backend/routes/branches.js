@@ -100,6 +100,47 @@ router.get('/:id/stats', authenticateToken, requireRole(['admin']), async (req, 
   }
 });
 
+// GET branch operating hours
+router.get('/:id/hours', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const rows = await query(
+      'SELECT * FROM branch_hours WHERE branch_id = ? ORDER BY day_of_week', [req.params.id]
+    );
+    // If no rows yet return defaults for all 7 days
+    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const hoursMap = {};
+    rows.forEach(r => { hoursMap[r.day_of_week] = r; });
+    const hours = DAY_NAMES.map((name, i) => hoursMap[i] || {
+      branch_id: parseInt(req.params.id), day_of_week: i,
+      day_name: name, is_open: true, open_time: '09:00:00', close_time: '23:00:00'
+    }).map(r => ({ ...r, day_name: DAY_NAMES[r.day_of_week] }));
+    res.json({ hours });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch branch hours' });
+  }
+});
+
+// PUT branch operating hours — upsert all 7 days at once
+router.put('/:id/hours', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { hours } = req.body; // array of { day_of_week, is_open, open_time, close_time }
+    if (!Array.isArray(hours)) return res.status(400).json({ error: 'hours array required' });
+    const branchId = parseInt(req.params.id);
+    for (const h of hours) {
+      await query(
+        `INSERT INTO branch_hours (branch_id, day_of_week, is_open, open_time, close_time)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE is_open=VALUES(is_open), open_time=VALUES(open_time), close_time=VALUES(close_time)`,
+        [branchId, h.day_of_week, h.is_open ? 1 : 0, h.open_time, h.close_time]
+      );
+    }
+    res.json({ message: 'Hours updated' });
+  } catch (error) {
+    console.error('Update hours error:', error);
+    res.status(500).json({ error: 'Failed to update hours' });
+  }
+});
+
 // POST create branch (admin only)
 router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {

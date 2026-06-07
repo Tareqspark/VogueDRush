@@ -390,6 +390,28 @@ const cleanupExpiredTokens = async () => {
   }
 };
 
+// scopeBranch — resolves the effective branch_id for a request.
+// - Admin/manager with no branch_id: uses X-Branch-Id header (branch selector)
+// - Staff with branch_id: always forced to their assigned branch, header ignored
+// Attaches req.scopedBranchId (number|null). null = admin seeing all branches.
+const scopeBranch = (req, _res, next) => {
+  const user = req.user;
+  if (!user) return next();
+
+  if (user.branch_id) {
+    // Non-admin staff locked to their branch
+    req.scopedBranchId = user.branch_id;
+  } else if (user.role === 'admin') {
+    // Admin uses whatever branch the header says, or null (all)
+    const headerBranch = req.headers['x-branch-id'];
+    req.scopedBranchId = headerBranch ? parseInt(headerBranch) : null;
+  } else {
+    const headerBranch = req.headers['x-branch-id'];
+    req.scopedBranchId = headerBranch ? parseInt(headerBranch) : null;
+  }
+  next();
+};
+
 module.exports = {
   generateTokens,
   authenticateToken,
@@ -398,5 +420,6 @@ module.exports = {
   refreshToken,
   logout,
   optionalAuth,
-  cleanupExpiredTokens
+  cleanupExpiredTokens,
+  scopeBranch,
 };

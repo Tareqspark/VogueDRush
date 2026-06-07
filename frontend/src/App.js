@@ -237,8 +237,9 @@ const AppContent = () => {
     );
   }
 
-  // Show branch selector when authenticated but no branch chosen yet
-  if (user && !selectedBranch) {
+  // Staff with an assigned branch skip the selector — auto-selected on login via AuthContext
+  // Admins/managers without an assigned branch see the selector
+  if (user && !selectedBranch && !user.branch_id) {
     return (
       <Router>
         <BranchSelector />

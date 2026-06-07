@@ -30,8 +30,12 @@ router.get('/', requireAdmin, async (req, res) => {
     const { query } = require('../config/database');
 
     const users = await query(
-      `SELECT id, username, email, full_name, phone, role, is_active, created_at, updated_at
-       FROM users WHERE ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT u.id, u.username, u.email, u.full_name, u.phone, u.role, u.is_active,
+              u.branch_id, b.name AS branch_name, b.code AS branch_code,
+              u.created_at, u.updated_at
+       FROM users u
+       LEFT JOIN branches b ON b.id = u.branch_id
+       WHERE ${whereClause} ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
       [...values, limitInt, offsetInt]
     );
     
@@ -77,17 +81,20 @@ router.get('/:id', requireAdmin, validateId, async (req, res) => {
 // Create new user (admin only)
 router.post('/', requireAdmin, validateUser, async (req, res) => {
   try {
-    const { username, email, password, full_name, phone, role } = req.body;
-    
+    const { username, email, password, full_name, phone, role, branch_id } = req.body;
+
+    // Admin users must not be branch-scoped
+    const resolvedBranchId = (role === 'admin') ? null : (branch_id || null);
+
     // Check if username or email already exists
     const existingUser = await findOne('users', '(username = ? OR email = ?)', [username, email]);
     if (existingUser) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
-    
+
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
-    
+
     // Create user
     const userData = {
       username,
@@ -96,6 +103,7 @@ router.post('/', requireAdmin, validateUser, async (req, res) => {
       full_name,
       phone: phone || null,
       role,
+      branch_id: resolvedBranchId,
       is_active: true
     };
     
@@ -131,14 +139,14 @@ router.post('/', requireAdmin, validateUser, async (req, res) => {
 router.put('/:id', requireAdmin, validateId, async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, email, full_name, phone, role, is_active, password } = req.body;
-    
+    const { username, email, full_name, phone, role, is_active, password, branch_id } = req.body;
+
     // Check if user exists
     const existingUser = await findOne('users', { id });
     if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     // Check if username or email already exists for another user
     if (username !== existingUser.username || email !== existingUser.email) {
       const duplicateUser = await findOne('users', '(username = ? OR email = ?) AND id != ?', [username, email, id]);
@@ -146,7 +154,9 @@ router.put('/:id', requireAdmin, validateId, async (req, res) => {
         return res.status(400).json({ error: 'Username or email already exists' });
       }
     }
-    
+
+    const resolvedBranchId = (role === 'admin') ? null : (branch_id !== undefined ? (branch_id || null) : existingUser.branch_id);
+
     // Prepare update data
     const updateData = {
       username,
@@ -154,6 +164,7 @@ router.put('/:id', requireAdmin, validateId, async (req, res) => {
       full_name,
       phone: phone || null,
       role,
+      branch_id: resolvedBranchId,
       is_active: is_active !== undefined ? is_active : existingUser.is_active,
       updated_at: new Date()
     };

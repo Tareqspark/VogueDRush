@@ -445,8 +445,27 @@ server.listen(PORT, async () => {
   // Idempotent schema patches — safe to run on every startup
   try {
     const { query } = require('./config/database');
+
     await query(`ALTER TABLE orders MODIFY COLUMN status ENUM('pending','preparing','ready','done','cancelled','hold') DEFAULT 'pending'`);
-    console.log('✅ Schema patch applied: orders.status includes hold');
+    console.log('✅ Patch: orders.status includes hold');
+
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
+    console.log('✅ Patch: users.branch_id added');
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS branch_hours (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_id INT NOT NULL,
+        day_of_week TINYINT NOT NULL COMMENT '0=Sun,1=Mon,...,6=Sat',
+        is_open BOOLEAN DEFAULT TRUE,
+        open_time TIME NOT NULL DEFAULT '09:00:00',
+        close_time TIME NOT NULL DEFAULT '23:00:00',
+        UNIQUE KEY uq_branch_day (branch_id, day_of_week),
+        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('✅ Patch: branch_hours table ready');
+
   } catch (err) {
     console.error('⚠️  Schema patch warning:', err.message);
   }

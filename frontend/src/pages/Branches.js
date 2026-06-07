@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
 import {
   PlusIcon, XMarkIcon, PencilSquareIcon, TrashIcon,
-  BuildingOffice2Icon, CheckCircleIcon, XCircleIcon,
+  BuildingOffice2Icon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronDownIcon, ChevronUpIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 const StatPill = ({ label, value, color = 'slate' }) => (
   <div className={`text-center px-3 py-2 rounded-xl bg-${color}-50 border border-${color}-100`}>
@@ -21,6 +23,7 @@ export default function Branches() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [hoursOpen, setHoursOpen] = useState(null);
 
   const { data, isLoading } = useQuery(
     'branches-admin',
@@ -123,6 +126,15 @@ export default function Branches() {
                     <PencilSquareIcon className="h-4 w-4" />
                   </button>
                   <button
+                    onClick={() => setHoursOpen(hoursOpen === branch.id ? null : branch.id)}
+                    className="btn btn-sm bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
+                    title="Operating Hours"
+                  >
+                    <ClockIcon className="h-4 w-4" />
+                    Hours
+                    {hoursOpen === branch.id ? <ChevronUpIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
+                  </button>
+                  <button
                     onClick={() => handleToggle(branch)}
                     className={`btn btn-sm ${branch.is_active ? 'bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
                     title={branch.is_active ? 'Deactivate' : 'Activate'}
@@ -148,6 +160,11 @@ export default function Branches() {
                 <StatPill label="Total Orders"   value={branch.stats?.total_orders || 0}   color="violet" />
                 <StatPill label="Total Revenue"  value={`৳${(branch.stats?.total_revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="slate" />
               </div>
+
+              {/* Operating hours panel */}
+              {hoursOpen === branch.id && (
+                <BranchHoursPanel api={api} branchId={branch.id} />
+              )}
             </div>
           ))}
         </div>
@@ -179,6 +196,74 @@ export default function Branches() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BranchHoursPanel({ api, branchId }) {
+  const [hours, setHours] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  React.useEffect(() => {
+    api.get(`/branches/${branchId}/hours`).then(r => setHours(r.data.hours));
+  }, [branchId]); // eslint-disable-line
+
+  const update = (idx, key, value) => {
+    setHours(prev => prev.map((h, i) => i === idx ? { ...h, [key]: value } : h));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/branches/${branchId}/hours`, { hours });
+      toast.success('Operating hours saved');
+    } catch { toast.error('Failed to save hours'); }
+    finally { setSaving(false); }
+  };
+
+  if (!hours) return <div className="mt-3 flex justify-center py-4"><LoadingSpinner /></div>;
+
+  return (
+    <div className="mt-4 border border-slate-100 rounded-xl overflow-hidden">
+      <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between">
+        <span className="text-xs font-black text-slate-600 uppercase tracking-wide">Operating Hours</span>
+        <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">
+          {saving ? <LoadingSpinner size="sm" /> : 'Save Hours'}
+        </button>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {hours.map((h, i) => (
+          <div key={h.day_of_week} className="flex items-center gap-3 px-4 py-2.5 flex-wrap">
+            <div className="w-24 text-sm font-semibold text-slate-700">{DAY_NAMES[h.day_of_week]}</div>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!h.is_open}
+                onChange={e => update(i, 'is_open', e.target.checked)}
+                className="h-4 w-4 accent-sky-600 rounded"
+              />
+              <span className="text-xs text-slate-500">{h.is_open ? 'Open' : 'Closed'}</span>
+            </label>
+            {h.is_open && (
+              <div className="flex items-center gap-2 ml-2">
+                <input
+                  type="time"
+                  value={h.open_time?.slice(0,5) || '09:00'}
+                  onChange={e => update(i, 'open_time', e.target.value)}
+                  className="input py-1 px-2 text-sm w-28"
+                />
+                <span className="text-slate-400 text-xs">to</span>
+                <input
+                  type="time"
+                  value={h.close_time?.slice(0,5) || '23:00'}
+                  onChange={e => update(i, 'close_time', e.target.value)}
+                  className="input py-1 px-2 text-sm w-28"
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

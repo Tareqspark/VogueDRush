@@ -1622,11 +1622,121 @@ function ItemsSoldByCategory({ api }) {
 }
 
 // ─── Report Registry ─────────────────────────────────────────────
+// ─── Branch Summary ──────────────────────────────────────────────
+function BranchSummaryReport({ api }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [start, setStart] = useState(today);
+  const [end, setEnd] = useState(today);
+  const { data: branchesData } = useQuery('branches-list-rpt', () => api.get('/branches').then(r => r.data));
+  const [branchId, setBranchId] = useState('');
+  const { data, isLoading } = useQuery(
+    ['branch-summary-rpt', branchId, start, end],
+    () => api.get('/reports/branch-summary', { params: { branch_id: branchId || undefined, date_from: start, date_to: end } }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+  const branches = (branchesData?.branches || []).filter(b => b.is_active);
+  const rows = data?.summary || [];
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end">
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">From</label><input type="date" value={start} onChange={e => setStart(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">To</label><input type="date" value={end} onChange={e => setEnd(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">Branch</label>
+          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="">All Branches</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+      </div>
+      {isLoading ? <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-2 border-red-500 border-t-transparent rounded-full" /></div> : (
+        <div className="space-y-4">
+          {rows.map(b => (
+            <div key={b.branch_id} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-sky-400 to-violet-500 flex items-center justify-center text-white font-black text-xs">{b.branch_code}</div>
+                <h3 className="font-bold text-gray-800">{b.branch_name}</h3>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                {[['Total Orders', b.total_orders],['Revenue', `৳${parseFloat(b.total_revenue).toLocaleString(undefined,{maximumFractionDigits:0})}`],['Avg Order', `৳${parseFloat(b.avg_order_value).toFixed(0)}`],['Cancelled', b.cancelled_orders]].map(([l,v]) => (
+                  <div key={l} className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-sm text-gray-400">{l}</div><div className="font-black text-gray-800 text-lg">{v}</div></div>
+                ))}
+              </div>
+              {b.top_items.length > 0 && (
+                <div><div className="text-xs font-bold text-gray-400 uppercase mb-1">Top Items</div>
+                  <div className="flex flex-wrap gap-2">{b.top_items.map(item => (
+                    <span key={item.item_name} className="text-xs bg-sky-50 text-sky-700 border border-sky-100 px-2 py-0.5 rounded-full">{item.item_name} ×{item.qty}</span>
+                  ))}</div>
+                </div>
+              )}
+            </div>
+          ))}
+          {rows.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">No data for selected period</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Branch Comparison ───────────────────────────────────────────
+function BranchComparisonReport({ api }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [start, setStart] = useState(today);
+  const [end, setEnd] = useState(today);
+  const { data, isLoading } = useQuery(
+    ['branch-comparison-rpt', start, end],
+    () => api.get('/reports/branch-comparison', { params: { date_from: start, date_to: end } }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+  const rows = data?.comparison || [];
+  const maxRevenue = Math.max(...rows.map(r => r.revenue), 1);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end">
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">From</label><input type="date" value={start} onChange={e => setStart(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+        <div><label className="text-xs font-semibold text-gray-500 block mb-1">To</label><input type="date" value={end} onChange={e => setEnd(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+      </div>
+      {isLoading ? <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-2 border-red-500 border-t-transparent rounded-full" /></div> : (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>{['Branch','Orders','Revenue','Avg Check','Today Orders','Today Revenue','Revenue Share'].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">{h}</th>
+              ))}</tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rows.map((r, i) => (
+                <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                  <td className="px-4 py-3 font-bold text-gray-800">{r.name} <span className="text-xs text-gray-400">({r.code})</span></td>
+                  <td className="px-4 py-3 text-gray-700">{r.orders}</td>
+                  <td className="px-4 py-3 font-bold text-sky-600">৳{r.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                  <td className="px-4 py-3 text-gray-700">৳{r.avg_check.toFixed(0)}</td>
+                  <td className="px-4 py-3 text-gray-700">{r.today_orders}</td>
+                  <td className="px-4 py-3 text-emerald-600 font-semibold">৳{r.today_revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-gray-100 rounded-full h-2">
+                        <div className="bg-sky-500 h-2 rounded-full" style={{ width: `${(r.revenue / maxRevenue) * 100}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-500 w-10 text-right">{((r.revenue / maxRevenue) * 100).toFixed(0)}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">No data for selected period</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const REPORT_GROUPS = [
   { label:'Sales', items:[{ id:'sales-summary', label:'Daily Sales Summary' },{ id:'cancel-report', label:'Cancel Report' },{ id:'hold-report', label:'Hold / Due Report' }] },
   { label:'Financial', items:[{ id:'payment-methods', label:'Payment Methods' },{ id:'vat-report', label:'VAT Report' },{ id:'collection-summary', label:'Collection Report' },{ id:'payment-collection', label:'Payment Collection' },{ id:'discount-report', label:'Discount Report' },{ id:'due-collection', label:'Due Collection' }] },
   { label:'Operations', items:[{ id:'category-sales', label:'Category Sales' },{ id:'items-by-name', label:'Items Sold By Name' },{ id:'items-by-category', label:'Items Sold By Category' },{ id:'delivery-report', label:'Home Delivery' },{ id:'reservation-report', label:'Reservations' }] },
   { label:'Analytics', items:[{ id:'user-summary', label:'User Sales Summary' },{ id:'yearly-summary', label:'Yearly Summary' },{ id:'customer-search', label:'Customer Search' },{ id:'menu-list', label:'Menu List' }] },
+  { label:'Branch', items:[{ id:'branch-summary', label:'Branch Summary' },{ id:'branch-comparison', label:'Branch Comparison' }] },
 ];
 const REPORT_COMPONENT = {
   'sales-summary':      DailySalesSummary,
@@ -1647,6 +1757,8 @@ const REPORT_COMPONENT = {
   'yearly-summary':     YearlySummary,
   'customer-search':    CustomerSearchReport,
   'menu-list':          MenuListReport,
+  'branch-summary':     BranchSummaryReport,
+  'branch-comparison':  BranchComparisonReport,
 };
 
 // ─── Main Reports Page ───────────────────────────────────────────
