@@ -249,14 +249,11 @@ router.get('/items', scopeBranch, async (req, res) => {
     // True branch isolation: only show items belonging to this branch
     const branchId = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
     if (branchId) {
-      whereClause += ` AND fi.branch_id = ${parseInt(branchId)}`;
-      // Also apply availability overrides within branch items
-      whereClause += ` AND (
-        SELECT COALESCE(bmo.is_available, 1)
-        FROM branch_menu_overrides bmo
-        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${parseInt(branchId)}
-        LIMIT 1
-      ) = 1`;
+      whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${parseInt(branchId)})`;
+      whereClause += ` AND COALESCE((
+        SELECT bmo.is_available FROM branch_menu_overrides bmo
+        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${parseInt(branchId)} LIMIT 1
+      ), 1) = 1`;
     }
 
     // Get items — include branch-specific price when branch header is present
@@ -353,16 +350,30 @@ router.post('/items', requireRole(['admin']), scopeBranch, validateFoodItem, asy
     // Resolve branch for this item
     const itemBranchId = req.scopedBranchId || parseInt(req.headers['x-branch-id']) || 1;
 
-    // Check if item name already exists in the same category AND branch
     const { query } = require('../config/database');
-    const existing = await query('SELECT id FROM food_items WHERE category_id = ? AND name = ? AND branch_id = ?', [category_id, name, itemBranchId]);
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'Item name already exists in this category for this branch' });
+
+    // Check duplicate name within same branch (gracefully skip if branch_id column absent)
+    try {
+      const existing = await query(
+        'SELECT id FROM food_items WHERE category_id = ? AND name = ? AND branch_id = ?',
+        [category_id, name, itemBranchId]
+      );
+      if (existing.length > 0) {
+        return res.status(400).json({ error: 'Item name already exists in this category for this branch' });
+      }
+    } catch (_) {}
+
+    // Build item data — include branch_id only if the column exists
+    let hasBranchCol = true;
+    try {
+      await query('SELECT branch_id FROM food_items LIMIT 0');
+    } catch (_) {
+      hasBranchCol = false;
     }
 
     const itemData = {
       category_id,
-      branch_id: itemBranchId,
+      ...(hasBranchCol && { branch_id: itemBranchId }),
       name,
       description: description || null,
       price: parseFloat(price),
@@ -373,7 +384,7 @@ router.post('/items', requireRole(['admin']), scopeBranch, validateFoodItem, asy
       preparation_time: preparation_time || 15,
       display_order: display_order || 0
     };
-    
+
     const newItem = await insert('food_items', itemData);
     
     // Log audit
