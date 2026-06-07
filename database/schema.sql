@@ -80,7 +80,7 @@ CREATE TABLE orders (
     waiter_id INT NOT NULL,
     customer_name VARCHAR(100),
     customer_phone VARCHAR(20),
-    status ENUM('pending', 'preparing', 'ready', 'done', 'cancelled') DEFAULT 'pending',
+    status ENUM('pending', 'preparing', 'ready', 'done', 'cancelled', 'hold') DEFAULT 'pending',
     subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     vat_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     service_charge DECIMAL(10,2) NOT NULL DEFAULT 0.00,

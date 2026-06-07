@@ -433,7 +433,7 @@ process.on('SIGTERM', () => {
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔌 Socket.IO enabled for real-time updates`);
@@ -441,6 +441,15 @@ server.listen(PORT, () => {
   // M-8: Run token blacklist / session cleanup once immediately, then every hour
   cleanupExpiredTokens();
   setInterval(cleanupExpiredTokens, 60 * 60 * 1000);
+
+  // Idempotent schema patches — safe to run on every startup
+  try {
+    const { query } = require('./config/database');
+    await query(`ALTER TABLE orders MODIFY COLUMN status ENUM('pending','preparing','ready','done','cancelled','hold') DEFAULT 'pending'`);
+    console.log('✅ Schema patch applied: orders.status includes hold');
+  } catch (err) {
+    console.error('⚠️  Schema patch warning:', err.message);
+  }
 });
 
 module.exports = { app, server, io };
