@@ -558,28 +558,43 @@ server.listen(PORT, async () => {
   // Each branch owns its own menu — no cross-branch cloning.
 
   // One-time cleanup: remove items that the old auto-clone startup code
-  // copied from branch 1 into other branches.  We identify clones by matching
-  // name + category against branch 1.  A system_settings flag prevents this
-  // from running again after the first successful pass.
+  // copied from branch 1 into other branches.
+  // Uses two-step SELECT + DELETE to avoid MySQL 5.7 self-referencing
+  // subquery restriction ("can't specify target table for update in FROM clause").
   try {
     const flagRows = await query(
-      `SELECT 1 FROM system_settings WHERE setting_key = 'branch_isolation_cleanup_v1' LIMIT 1`
+      'SELECT 1 FROM system_settings WHERE setting_key = ? LIMIT 1',
+      ['branch_isolation_cleanup_v2']
     );
     if (!flagRows.length) {
-      const result = await query(`
-        DELETE fi FROM food_items fi
+      // Step 1: SELECT clone IDs via a derived table (MySQL 5.7 safe)
+      const clones = await query(`
+        SELECT fi.id
+        FROM food_items fi
+        INNER JOIN (
+          SELECT name, category_id FROM food_items WHERE branch_id = 1
+        ) AS b1 ON b1.name = fi.name AND b1.category_id = fi.category_id
         WHERE fi.branch_id > 1
-          AND EXISTS (
-            SELECT 1 FROM food_items src
-            WHERE src.branch_id = 1
-              AND src.name        = fi.name
-              AND src.category_id = fi.category_id
-          )
       `);
-      console.log(`✅ One-time cleanup: removed ${result.affectedRows} cloned menu items from non-main branches`);
+
+      if (clones.length > 0) {
+        // Step 2: DELETE by IDs in batches of 200
+        let deleted = 0;
+        for (let i = 0; i < clones.length; i += 200) {
+          const chunk = clones.slice(i, i + 200).map(r => r.id);
+          const ph = chunk.map(() => '?').join(',');
+          const r = await query(`DELETE FROM food_items WHERE id IN (${ph})`, chunk);
+          deleted += r.affectedRows;
+        }
+        console.log(`✅ One-time cleanup: removed ${deleted} cloned menu items from non-main branches`);
+      } else {
+        console.log('⏭  One-time cleanup: no cloned items found');
+      }
+
+      // Mark as done — INSERT IGNORE handles duplicate key gracefully
       await query(
-        `INSERT INTO system_settings (setting_key, setting_value, data_type, description)
-         VALUES ('branch_isolation_cleanup_v1', '1', 'boolean', 'Marks that cloned menu items have been purged from non-main branches')`
+        'INSERT IGNORE INTO system_settings (setting_key, setting_value, data_type) VALUES (?, ?, ?)',
+        ['branch_isolation_cleanup_v2', '1', 'string']
       );
     }
   } catch (e) {
