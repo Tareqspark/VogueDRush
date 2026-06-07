@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import toast from 'react-hot-toast';
-import { XMarkIcon, PlusIcon, MinusIcon, TrashIcon, ClockIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, PlusIcon, MinusIcon, TrashIcon, ClockIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
 
@@ -174,18 +174,26 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
           {/* Menu selector */}
           <div>
             <label className="label">Add Items</label>
-            <div className="flex gap-2 mb-2">
-              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="select w-40">
+            <div className="flex flex-col gap-2 mb-2">
+              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="select">
                 <option value="">All Categories</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input
-                type="text"
-                placeholder="Search items..."
-                value={menuSearch}
-                onChange={e => setMenuSearch(e.target.value)}
-                className="input flex-1"
-              />
+              <div className="relative">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search items by name..."
+                  value={menuSearch}
+                  onChange={e => setMenuSearch(e.target.value)}
+                  className="input pl-9"
+                />
+                {menuSearch && (
+                  <button type="button" onClick={() => setMenuSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    <XMarkIcon className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto border border-slate-100 rounded-xl p-2">
               {menuItems.length === 0 ? (
