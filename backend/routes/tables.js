@@ -143,18 +143,23 @@ router.get('/:id', validateId, async (req, res) => {
 });
 
 // Create new table (admin only)
-router.post('/', requireAdmin, validateTable, async (req, res) => {
+router.post('/', requireAdmin, scopeBranch, validateTable, async (req, res) => {
   try {
     const { table_number, capacity, location } = req.body;
-    
-    // Check if table number already exists
-    const existingTable = await findOne('tables', { table_number });
-    if (existingTable) {
-      return res.status(400).json({ error: 'Table number already exists' });
+    const branchId = req.scopedBranchId || parseInt(req.headers['x-branch-id']) || 1;
+
+    // Uniqueness scoped to branch — same number can exist in different branches
+    const existing = await query(
+      'SELECT id FROM tables WHERE table_number = ? AND branch_id = ?',
+      [table_number, branchId]
+    );
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'Table number already exists in this branch' });
     }
-    
+
     const tableData = {
       table_number,
+      branch_id: branchId,
       capacity: parseInt(capacity),
       location: location || null,
       status: 'available'
@@ -197,11 +202,14 @@ router.put('/:id', requireAdmin, validateId, async (req, res) => {
       return res.status(404).json({ error: 'Table not found' });
     }
     
-    // Check if table number is being changed and if new number already exists
+    // Check uniqueness scoped to the table's own branch
     if (table_number && table_number !== existingTable.table_number) {
-      const duplicateTable = await findOne('tables', { table_number, id: { $ne: id } });
-      if (duplicateTable) {
-        return res.status(400).json({ error: 'Table number already exists' });
+      const dup = await query(
+        'SELECT id FROM tables WHERE table_number = ? AND branch_id = ? AND id != ?',
+        [table_number, existingTable.branch_id || 1, id]
+      );
+      if (dup.length > 0) {
+        return res.status(400).json({ error: 'Table number already exists in this branch' });
       }
     }
     

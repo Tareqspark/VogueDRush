@@ -1,6 +1,6 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { validateDeliveryDetails, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
@@ -22,7 +22,12 @@ router.get('/', async (req, res) => {
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
-    
+
+    if (req.scopedBranchId) {
+      whereClause += ' AND o.branch_id = ?';
+      values.push(req.scopedBranchId);
+    }
+
     if (delivery_status) {
       whereClause += ' AND dd.delivery_status = ?';
       values.push(delivery_status);
@@ -444,7 +449,7 @@ router.put('/:id', validateId, async (req, res) => {
 });
 
 // Get pending deliveries for dashboard
-router.get('/pending/list', async (req, res) => {
+router.get('/pending/list', scopeBranch, async (req, res) => {
   try {
     const { query } = require('../config/database');
     
@@ -478,7 +483,7 @@ router.get('/pending/list', async (req, res) => {
 });
 
 // Get delivery statistics
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', scopeBranch, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     

@@ -1,6 +1,6 @@
 const express = require('express');
 const { findOne, findMany, insert, update, remove, transaction } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { validateReservation, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
 
@@ -23,7 +23,12 @@ router.get('/', async (req, res) => {
     const offsetInt = (parseInt(page) - 1) * limitInt;
     let whereClause = '1=1';
     let values = [];
-    
+
+    if (req.scopedBranchId) {
+      whereClause += ' AND r.branch_id = ?';
+      values.push(req.scopedBranchId);
+    }
+
     if (status) {
       whereClause += ' AND r.status = ?';
       values.push(status);
@@ -281,6 +286,7 @@ router.post('/', validateReservation, async (req, res) => {
         reservation_date,
         reservation_time,
         table_id: table_id || null,
+        branch_id: req.scopedBranchId || parseInt(req.headers['x-branch-id']) || 1,
         status: 'pending',
         special_requests: special_requests || null,
         pre_order_id: preOrderId,
@@ -620,22 +626,23 @@ router.delete('/:id', validateId, async (req, res) => {
 });
 
 // Get today's reservations
-router.get('/today/list', async (req, res) => {
+router.get('/today/list', scopeBranch, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     
     const { query } = require('../config/database');
     
+    const branchFilter = req.scopedBranchId ? `AND r.branch_id = ${req.scopedBranchId}` : '';
     const reservationsQuery = `
       SELECT r.*, t.table_number, t.location as table_location,
              u.username as created_by_name
       FROM reservations r
       LEFT JOIN tables t ON r.table_id = t.id
       LEFT JOIN users u ON r.created_by = u.id
-      WHERE r.reservation_date = ?
+      WHERE r.reservation_date = ? ${branchFilter}
       ORDER BY r.reservation_time ASC
     `;
-    
+
     const reservations = await query(reservationsQuery, [today]);
     
     res.json({
@@ -650,7 +657,7 @@ router.get('/today/list', async (req, res) => {
 });
 
 // Get reservation statistics
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', scopeBranch, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     
@@ -658,17 +665,20 @@ router.get('/stats/overview', async (req, res) => {
     
     let dateFilter = '';
     let values = [];
-    
+    const branchClause = req.scopedBranchId ? `AND branch_id = ${req.scopedBranchId}` : '';
+
     if (start_date && end_date) {
-      dateFilter = 'WHERE reservation_date BETWEEN ? AND ?';
+      dateFilter = `WHERE reservation_date BETWEEN ? AND ? ${branchClause}`;
       values = [start_date, end_date];
+    } else {
+      dateFilter = branchClause ? `WHERE ${branchClause.slice(4)}` : '';
     }
-    
+
     // Get reservation counts by status
     const statusStats = await query(`
       SELECT status, COUNT(*) as count,
              AVG(party_size) as avg_party_size
-      FROM reservations 
+      FROM reservations
       ${dateFilter}
       GROUP BY status
     `, values);

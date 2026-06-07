@@ -533,6 +533,15 @@ server.listen(PORT, async () => {
     `);
     console.log('✅ Patch: branch_expenses table ready');
 
+    // Branch isolation patches for supporting tables
+    await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
+    await query(`UPDATE tables SET branch_id = 1 WHERE branch_id IS NULL`);
+    console.log('✅ Patch: tables.branch_id added');
+
+    await query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
+    await query(`UPDATE reservations SET branch_id = 1 WHERE branch_id IS NULL`);
+    console.log('✅ Patch: reservations.branch_id added');
+
     // Add branch_id to food_items for true menu isolation
     await query(`ALTER TABLE food_items ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
     console.log('✅ Patch: food_items.branch_id added');
