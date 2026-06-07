@@ -249,36 +249,30 @@ router.get('/items', scopeBranch, async (req, res) => {
     // Resolve numeric branch ID safely
     const rawBranch = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
     const branchId = rawBranch ? parseInt(rawBranch) : null;
+    const validBranchId = branchId && !isNaN(branchId) ? branchId : null;
 
-    // Check if branch_id column exists on food_items (may not after first deploy)
+    // Check if branch_id column exists (safe — column added via server startup patch)
     let branchColExists = false;
-    try {
-      await query('SELECT branch_id FROM food_items LIMIT 0');
-      branchColExists = true;
-    } catch (_) {}
-
-    // Build branch-specific SQL fragments
-    // branchId is validated as a non-NaN integer so direct interpolation is safe
-    let branchJoin = '';
-    let branchPriceSelect = '';
-
-    if (branchId && !isNaN(branchId)) {
-      // Branch item filter — only show items belonging to this branch
-      if (branchColExists) {
-        whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${branchId})`;
-      }
-      // Availability override (interpolated integer — safe)
-      whereClause += ` AND COALESCE((
-        SELECT bmo.is_available FROM branch_menu_overrides bmo
-        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${branchId} LIMIT 1
-      ), 1) = 1`;
-      // Branch-specific price join (interpolated integer — safe, no ? placeholder)
-      branchJoin = `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${branchId}`;
-      branchPriceSelect = ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price';
+    if (validBranchId) {
+      try {
+        await query('SELECT branch_id FROM food_items LIMIT 0');
+        branchColExists = true;
+      } catch (_) {}
     }
 
-    // values array now contains ONLY the non-branch WHERE params (category, availability, search)
-    // LIMIT and OFFSET are appended last — no ordering mismatch possible
+    // Apply branch filter — only if column exists and we have a valid branch
+    if (validBranchId && branchColExists) {
+      whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${validBranchId})`;
+    }
+
+    // Branch-specific price join — safe integer interpolation, no ? placeholder
+    const branchJoin = validBranchId
+      ? `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${validBranchId}`
+      : '';
+    const branchPriceSelect = validBranchId
+      ? ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price'
+      : '';
+
     const itemsQuery = `
       SELECT fi.*, fc.name as category_name, fc.icon as category_icon ${branchPriceSelect}
       FROM food_items fi
@@ -291,8 +285,10 @@ router.get('/items', scopeBranch, async (req, res) => {
 
     const items = await query(itemsQuery, [...values, limitInt, offsetInt]);
 
-    const countQuery = `SELECT COUNT(*) as total FROM food_items fi WHERE ${whereClause}`;
-    const countResult = await query(countQuery, values);
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM food_items fi ${branchJoin} WHERE ${whereClause}`,
+      values
+    );
     const total = countResult[0].total;
     
     res.json({
@@ -306,8 +302,8 @@ router.get('/items', scopeBranch, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get food items error:', error);
-    res.status(500).json({ error: 'Failed to fetch food items' });
+    console.error('Get food items error:', error.message, error.sql || '');
+    res.status(500).json({ error: 'Failed to fetch food items', detail: error.message });
   }
 });
 
