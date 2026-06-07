@@ -556,6 +556,35 @@ server.listen(PORT, async () => {
     )`);
 
   // Each branch owns its own menu — no cross-branch cloning.
+
+  // One-time cleanup: remove items that the old auto-clone startup code
+  // copied from branch 1 into other branches.  We identify clones by matching
+  // name + category against branch 1.  A system_settings flag prevents this
+  // from running again after the first successful pass.
+  try {
+    const flagRows = await query(
+      `SELECT 1 FROM system_settings WHERE setting_key = 'branch_isolation_cleanup_v1' LIMIT 1`
+    );
+    if (!flagRows.length) {
+      const result = await query(`
+        DELETE fi FROM food_items fi
+        WHERE fi.branch_id > 1
+          AND EXISTS (
+            SELECT 1 FROM food_items src
+            WHERE src.branch_id = 1
+              AND src.name        = fi.name
+              AND src.category_id = fi.category_id
+          )
+      `);
+      console.log(`✅ One-time cleanup: removed ${result.affectedRows} cloned menu items from non-main branches`);
+      await query(
+        `INSERT INTO system_settings (setting_key, setting_value, data_type, description)
+         VALUES ('branch_isolation_cleanup_v1', '1', 'boolean', 'Marks that cloned menu items have been purged from non-main branches')`
+      );
+    }
+  } catch (e) {
+    console.error('⚠️  Branch isolation cleanup failed:', e.message);
+  }
 });
 
 module.exports = { app, server, io };
