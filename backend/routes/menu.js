@@ -246,37 +246,56 @@ router.get('/items', scopeBranch, async (req, res) => {
     
     const { query } = require('../config/database');
 
-    // True branch isolation: only show items belonging to this branch
-    const branchId = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
-    if (branchId) {
-      whereClause += ` AND (fi.branch_id IS NULL OR fi.branch_id = ${parseInt(branchId)})`;
+    // Resolve numeric branch ID safely
+    const rawBranch = req.scopedBranchId || req.headers['x-branch-id'] || req.query.branch_id;
+    const branchId = rawBranch ? parseInt(rawBranch) : null;
+
+    // Check if branch_id column exists on food_items (may not after first deploy)
+    let branchColExists = false;
+    try {
+      await query('SELECT branch_id FROM food_items LIMIT 0');
+      branchColExists = true;
+    } catch (_) {}
+
+    // Apply branch filter using parameterized queries (no string interpolation)
+    let branchJoin = '';
+    let branchPriceSelect = '';
+
+    if (branchId && !isNaN(branchId)) {
+      if (branchColExists) {
+        whereClause += ' AND (fi.branch_id IS NULL OR fi.branch_id = ?)';
+        values.push(branchId);
+      }
+      // Availability override — parameterized
       whereClause += ` AND COALESCE((
         SELECT bmo.is_available FROM branch_menu_overrides bmo
-        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ${parseInt(branchId)} LIMIT 1
+        WHERE bmo.food_item_id = fi.id AND bmo.branch_id = ? LIMIT 1
       ), 1) = 1`;
-    }
+      values.push(branchId);
 
-    // Get items — include branch-specific price when branch header is present
-    const branchPriceJoin = branchId
-      ? `LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ${parseInt(branchId)}`
-      : '';
-    const branchPriceSelect = branchId
-      ? ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price'
-      : '';
+      // Branch-specific price join
+      branchJoin = 'LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ?';
+      branchPriceSelect = ', COALESCE(bip.price, fi.promotional_price, fi.price) AS effective_price';
+    }
 
     const itemsQuery = `
       SELECT fi.*, fc.name as category_name, fc.icon as category_icon ${branchPriceSelect}
       FROM food_items fi
       LEFT JOIN food_categories fc ON fi.category_id = fc.id
-      ${branchPriceJoin}
+      ${branchJoin}
       WHERE ${whereClause}
       ORDER BY fc.display_order ASC, fi.display_order ASC, fi.name ASC
       LIMIT ? OFFSET ?
     `;
 
-    const items = await query(itemsQuery, [...values, limitInt, offsetInt]);
-    
-    // Get total count
+    // Build values for main query (branch price join needs branchId inserted before LIMIT/OFFSET)
+    const itemValues = branchId && !isNaN(branchId)
+      ? [...values, branchId, limitInt, offsetInt]
+      : [...values, limitInt, offsetInt];
+
+    const items = await query(itemsQuery, itemValues);
+
+    // Count — no price join needed
     const countQuery = `SELECT COUNT(*) as total FROM food_items fi WHERE ${whereClause}`;
     const countResult = await query(countQuery, values);
     const total = countResult[0].total;
