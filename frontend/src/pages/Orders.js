@@ -1410,13 +1410,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
               onChange={e => setSpecialInstructions(e.target.value)}
             />
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
-              <div className="flex justify-between text-slate-500">
-                <span>Food Price</span><span>৳{subtotal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-slate-500">
-                <span>VAT ({restaurantConfig?.vat_percentage ?? 15}%)</span><span>৳{vat.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between font-black text-slate-800 text-base border-t border-slate-200 pt-2">
+              <div className="flex justify-between font-black text-slate-800 text-base">
                 <span>Total Payable</span><span>৳{total.toFixed(2)}</span>
               </div>
             </div>
