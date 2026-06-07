@@ -444,113 +444,119 @@ server.listen(PORT, async () => {
   cleanupExpiredTokens();
   setInterval(cleanupExpiredTokens, 60 * 60 * 1000);
 
-  // Idempotent schema patches — safe to run on every startup
+  // Idempotent schema patches — each runs independently so one failure never blocks others.
+  // ADD COLUMN uses duplicate-column catch (MySQL 5.7 compatible — no IF NOT EXISTS support).
+  const { query } = require('./config/database');
+  const patch = async (label, sql, params = []) => {
+    try {
+      await query(sql, params);
+      console.log(`✅ Patch: ${label}`);
+    } catch (e) {
+      // 1060 = ER_DUP_FIELDNAME (column already exists) — safe to ignore
+      // 1050 = ER_TABLE_EXISTS_ERROR (table already exists) — safe to ignore
+      if (e.errno === 1060 || e.errno === 1050) {
+        console.log(`⏭  Patch skip (already applied): ${label}`);
+      } else {
+        console.error(`⚠️  Patch failed [${label}]: ${e.message}`);
+      }
+    }
+  };
+
+  await patch('orders.status includes hold',
+    `ALTER TABLE orders MODIFY COLUMN status ENUM('pending','preparing','ready','done','cancelled','hold') DEFAULT 'pending'`);
+
+  await patch('users.branch_id',
+    `ALTER TABLE users ADD COLUMN branch_id INT NULL DEFAULT NULL`);
+
+  await patch('tables.branch_id',
+    `ALTER TABLE tables ADD COLUMN branch_id INT NULL DEFAULT NULL`);
+
+  await patch('tables.branch_id backfill',
+    `UPDATE tables SET branch_id = 1 WHERE branch_id IS NULL`);
+
+  await patch('reservations.branch_id',
+    `ALTER TABLE reservations ADD COLUMN branch_id INT NULL DEFAULT NULL`);
+
+  await patch('reservations.branch_id backfill',
+    `UPDATE reservations SET branch_id = 1 WHERE branch_id IS NULL`);
+
+  await patch('food_items.branch_id',
+    `ALTER TABLE food_items ADD COLUMN branch_id INT NULL DEFAULT NULL`);
+
+  await patch('food_items.branch_id backfill to branch 1',
+    `UPDATE food_items SET branch_id = 1 WHERE branch_id IS NULL`);
+
+  await patch('branch_hours table', `
+    CREATE TABLE IF NOT EXISTS branch_hours (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id INT NOT NULL,
+      day_of_week TINYINT NOT NULL,
+      is_open BOOLEAN DEFAULT TRUE,
+      open_time TIME NOT NULL DEFAULT '09:00:00',
+      close_time TIME NOT NULL DEFAULT '23:00:00',
+      UNIQUE KEY uq_branch_day (branch_id, day_of_week),
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+    )`);
+
+  await patch('branch_menu_overrides table', `
+    CREATE TABLE IF NOT EXISTS branch_menu_overrides (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id INT NOT NULL,
+      food_item_id INT NOT NULL,
+      is_available BOOLEAN DEFAULT FALSE,
+      UNIQUE KEY uq_branch_item (branch_id, food_item_id),
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
+    )`);
+
+  await patch('branch_item_prices table', `
+    CREATE TABLE IF NOT EXISTS branch_item_prices (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id INT NOT NULL,
+      food_item_id INT NOT NULL,
+      price DECIMAL(10,2) NOT NULL,
+      UNIQUE KEY uq_branch_item_price (branch_id, food_item_id),
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
+    )`);
+
+  await patch('branch_expenses table', `
+    CREATE TABLE IF NOT EXISTS branch_expenses (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id INT NOT NULL,
+      category ENUM('rent','utilities','salaries','supplies','maintenance','marketing','other') DEFAULT 'other',
+      amount DECIMAL(10,2) NOT NULL,
+      description VARCHAR(255),
+      expense_date DATE NOT NULL,
+      created_by INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )`);
+
+  await patch('inventory_transfers table', `
+    CREATE TABLE IF NOT EXISTS inventory_transfers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      from_branch_id INT NOT NULL,
+      to_branch_id INT NOT NULL,
+      food_item_id INT NOT NULL,
+      quantity DECIMAL(10,2) NOT NULL,
+      unit VARCHAR(20) DEFAULT 'unit',
+      notes TEXT,
+      status ENUM('pending','approved','rejected','completed') DEFAULT 'pending',
+      requested_by INT NOT NULL,
+      approved_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP NULL,
+      FOREIGN KEY (from_branch_id) REFERENCES branches(id),
+      FOREIGN KEY (to_branch_id) REFERENCES branches(id),
+      FOREIGN KEY (food_item_id) REFERENCES food_items(id),
+      FOREIGN KEY (requested_by) REFERENCES users(id),
+      FOREIGN KEY (approved_by) REFERENCES users(id)
+    )`);
+
+  // Clone branch 1 menu into any new branch that has no items yet
   try {
-    const { query } = require('./config/database');
-
-    await query(`ALTER TABLE orders MODIFY COLUMN status ENUM('pending','preparing','ready','done','cancelled','hold') DEFAULT 'pending'`);
-    console.log('✅ Patch: orders.status includes hold');
-
-    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
-    console.log('✅ Patch: users.branch_id added');
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS branch_hours (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        branch_id INT NOT NULL,
-        day_of_week TINYINT NOT NULL COMMENT '0=Sun,1=Mon,...,6=Sat',
-        is_open BOOLEAN DEFAULT TRUE,
-        open_time TIME NOT NULL DEFAULT '09:00:00',
-        close_time TIME NOT NULL DEFAULT '23:00:00',
-        UNIQUE KEY uq_branch_day (branch_id, day_of_week),
-        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
-      )
-    `);
-    console.log('✅ Patch: branch_hours table ready');
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS branch_menu_overrides (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        branch_id INT NOT NULL,
-        food_item_id INT NOT NULL,
-        is_available BOOLEAN DEFAULT FALSE,
-        UNIQUE KEY uq_branch_item (branch_id, food_item_id),
-        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
-        FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
-      )
-    `);
-    console.log('✅ Patch: branch_menu_overrides table ready');
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS inventory_transfers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        from_branch_id INT NOT NULL,
-        to_branch_id INT NOT NULL,
-        food_item_id INT NOT NULL,
-        quantity DECIMAL(10,2) NOT NULL,
-        unit VARCHAR(20) DEFAULT 'unit',
-        notes TEXT,
-        status ENUM('pending','approved','rejected','completed') DEFAULT 'pending',
-        requested_by INT NOT NULL,
-        approved_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        completed_at TIMESTAMP NULL,
-        FOREIGN KEY (from_branch_id) REFERENCES branches(id),
-        FOREIGN KEY (to_branch_id) REFERENCES branches(id),
-        FOREIGN KEY (food_item_id) REFERENCES food_items(id),
-        FOREIGN KEY (requested_by) REFERENCES users(id),
-        FOREIGN KEY (approved_by) REFERENCES users(id)
-      )
-    `);
-    console.log('✅ Patch: inventory_transfers table ready');
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS branch_item_prices (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        branch_id INT NOT NULL,
-        food_item_id INT NOT NULL,
-        price DECIMAL(10,2) NOT NULL,
-        UNIQUE KEY uq_branch_item_price (branch_id, food_item_id),
-        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
-        FOREIGN KEY (food_item_id) REFERENCES food_items(id) ON DELETE CASCADE
-      )
-    `);
-    console.log('✅ Patch: branch_item_prices table ready');
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS branch_expenses (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        branch_id INT NOT NULL,
-        category ENUM('rent','utilities','salaries','supplies','maintenance','marketing','other') DEFAULT 'other',
-        amount DECIMAL(10,2) NOT NULL,
-        description VARCHAR(255),
-        expense_date DATE NOT NULL,
-        created_by INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
-        FOREIGN KEY (created_by) REFERENCES users(id)
-      )
-    `);
-    console.log('✅ Patch: branch_expenses table ready');
-
-    // Branch isolation patches for supporting tables
-    await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
-    await query(`UPDATE tables SET branch_id = 1 WHERE branch_id IS NULL`);
-    console.log('✅ Patch: tables.branch_id added');
-
-    await query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
-    await query(`UPDATE reservations SET branch_id = 1 WHERE branch_id IS NULL`);
-    console.log('✅ Patch: reservations.branch_id added');
-
-    // Add branch_id to food_items for true menu isolation
-    await query(`ALTER TABLE food_items ADD COLUMN IF NOT EXISTS branch_id INT NULL DEFAULT NULL`);
-    console.log('✅ Patch: food_items.branch_id added');
-
-    // Assign existing branch-less items to branch 1 (the original branch)
-    await query(`UPDATE food_items SET branch_id = 1 WHERE branch_id IS NULL`);
-    console.log('✅ Patch: existing menu items assigned to branch 1');
-
-    // For every other active branch that has zero menu items, clone branch 1 items into it
     const otherBranches = await query(`
       SELECT b.id FROM branches b
       WHERE b.id != 1 AND b.is_active = 1
@@ -567,9 +573,8 @@ server.listen(PORT, async () => {
       `, [branch.id]);
       console.log(`✅ Patch: menu cloned from branch 1 to branch ${branch.id}`);
     }
-
-  } catch (err) {
-    console.error('⚠️  Schema patch warning:', err.message);
+  } catch (e) {
+    console.error('⚠️  Menu clone patch failed:', e.message);
   }
 });
 

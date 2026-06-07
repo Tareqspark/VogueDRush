@@ -235,12 +235,12 @@ router.get('/items', scopeBranch, async (req, res) => {
     }
     
     if (min_price) {
-      whereClause += ' AND (fi.promotional_price IS NOT NULL ? fi.promotional_price : fi.price) >= ?';
+      whereClause += ' AND COALESCE(fi.promotional_price, fi.price) >= ?';
       values.push(parseFloat(min_price));
     }
-    
+
     if (max_price) {
-      whereClause += ' AND (fi.promotional_price IS NOT NULL ? fi.promotional_price : fi.price) <= ?';
+      whereClause += ' AND COALESCE(fi.promotional_price, fi.price) <= ?';
       values.push(parseFloat(max_price));
     }
     

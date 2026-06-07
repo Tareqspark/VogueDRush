@@ -7,7 +7,7 @@ const { logManualAudit } = require('../middleware/audit');
 const router = express.Router();
 
 // Get all reservations with filtering and pagination
-router.get('/', async (req, res) => {
+router.get('/', scopeBranch, async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -144,7 +144,7 @@ router.get('/:id', validateId, async (req, res) => {
 });
 
 // Create new reservation
-router.post('/', validateReservation, async (req, res) => {
+router.post('/', scopeBranch, validateReservation, async (req, res) => {
   try {
     const { 
       customer_name, 
