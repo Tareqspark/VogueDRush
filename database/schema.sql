@@ -22,6 +22,18 @@ CREATE TABLE users (
     INDEX idx_role (role)
 );
 
+-- Branches
+CREATE TABLE IF NOT EXISTS branches (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(20) UNIQUE NOT NULL,
+    address VARCHAR(255),
+    phone VARCHAR(30),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Tables management for dine-in orders
 CREATE TABLE tables (
     id INT AUTO_INCREMENT PRIMARY KEY,
