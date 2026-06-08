@@ -472,18 +472,19 @@ router.get('/available/:date/:time', async (req, res) => {
 });
 
 // Get table statistics
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', scopeBranch, async (req, res) => {
   try {
-    const { query } = require('../config/database');
-    
+    const branchFilter = req.scopedBranchId ? `AND branch_id = ${parseInt(req.scopedBranchId, 10)}` : '';
+
     // Get table counts by status
     const statusStats = await query(`
       SELECT status, COUNT(*) as count,
              SUM(capacity) as total_capacity
       FROM tables
+      WHERE 1=1 ${branchFilter}
       GROUP BY status
     `);
-    
+
     // Get location statistics
     const locationStats = await query(`
       SELECT location, COUNT(*) as table_count,
@@ -492,29 +493,31 @@ router.get('/stats/overview', async (req, res) => {
              SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END) as occupied_count,
              SUM(CASE WHEN status = 'reserved' THEN 1 ELSE 0 END) as reserved_count
       FROM tables
+      WHERE 1=1 ${branchFilter}
       GROUP BY location
       ORDER BY location
     `);
-    
+
     // Get occupancy rate for today
     const todayOccupancy = await query(`
-      SELECT 
+      SELECT
         COUNT(*) as total_tables,
         SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END) as occupied_tables,
         ROUND(
-          (SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END) * 100.0) / 
-          NULLIF(COUNT(*), 0), 
+          (SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END) * 100.0) /
+          NULLIF(COUNT(*), 0),
           2
         ) as occupancy_rate
       FROM tables
+      WHERE 1=1 ${branchFilter}
     `);
-    
+
     res.json({
       statusStats,
       locationStats,
       todayOccupancy: todayOccupancy[0]
     });
-    
+
   } catch (error) {
     console.error('Get table stats error:', error);
     res.status(500).json({ error: 'Failed to fetch table statistics' });

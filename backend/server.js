@@ -452,9 +452,11 @@ server.listen(PORT, async () => {
       await query(sql, params);
       console.log(`✅ Patch: ${label}`);
     } catch (e) {
-      // 1060 = ER_DUP_FIELDNAME (column already exists) — safe to ignore
-      // 1050 = ER_TABLE_EXISTS_ERROR (table already exists) — safe to ignore
-      if (e.errno === 1060 || e.errno === 1050) {
+      // 1060 = ER_DUP_FIELDNAME (column already exists)
+      // 1050 = ER_TABLE_EXISTS_ERROR (table already exists)
+      // 1061 = ER_DUP_KEYNAME (unique/index already exists)
+      // 1091 = ER_CANT_DROP_FIELD_OR_KEY (drop of non-existent index)
+      if (e.errno === 1060 || e.errno === 1050 || e.errno === 1061 || e.errno === 1091) {
         console.log(`⏭  Patch skip (already applied): ${label}`);
       } else {
         console.error(`⚠️  Patch failed [${label}]: ${e.message}`);
@@ -473,6 +475,13 @@ server.listen(PORT, async () => {
 
   await patch('tables.branch_id backfill',
     `UPDATE tables SET branch_id = 1 WHERE branch_id IS NULL`);
+
+  // Replace global UNIQUE(table_number) with per-branch UNIQUE(table_number, branch_id)
+  // so managers in different branches can have the same table numbers.
+  await patch('tables.drop_global_unique_table_number',
+    `ALTER TABLE tables DROP INDEX table_number`);
+  await patch('tables.unique_table_number_per_branch',
+    `ALTER TABLE tables ADD UNIQUE KEY uq_table_number_branch (table_number, branch_id)`);
 
   await patch('reservations.branch_id',
     `ALTER TABLE reservations ADD COLUMN branch_id INT NULL DEFAULT NULL`);
