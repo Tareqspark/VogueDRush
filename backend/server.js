@@ -43,7 +43,9 @@ const inventoryTransfersRoutes = require('./routes/inventoryTransfers');
 const inventoryItemsRoutes = require('./routes/inventoryItems');
 const suppliersRoutes = require('./routes/suppliers');
 const purchaseOrdersRoutes = require('./routes/purchaseOrders');
-const recipesRoutes = require('./routes/recipes');
+const recipesRoutes  = require('./routes/recipes');
+const expensesRoutes = require('./routes/expenses');
+const wasteRoutes    = require('./routes/waste');
 
 const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
@@ -424,7 +426,9 @@ app.use('/api/inventory-transfers', inventoryTransfersRoutes);
 app.use('/api/inventory', authenticateToken, inventoryItemsRoutes);
 app.use('/api/suppliers', authenticateToken, suppliersRoutes);
 app.use('/api/purchase-orders', authenticateToken, purchaseOrdersRoutes);
-app.use('/api/recipes', authenticateToken, recipesRoutes);
+app.use('/api/recipes',   authenticateToken, recipesRoutes);
+app.use('/api/expenses',  authenticateToken, expensesRoutes);
+app.use('/api/waste',     authenticateToken, wasteRoutes);
 
 // 404 handler
 app.use('*', notFound);
@@ -716,6 +720,40 @@ server.listen(PORT, async () => {
       FOREIGN KEY (branch_id)   REFERENCES branches(id),
       FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
       FOREIGN KEY (created_by)  REFERENCES users(id)
+    )`);
+
+  await patch('expenses table', `
+    CREATE TABLE IF NOT EXISTS expenses (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id    INT NOT NULL,
+      expense_date DATE NOT NULL,
+      category     VARCHAR(80) NOT NULL,
+      description  VARCHAR(255) NOT NULL,
+      amount       DECIMAL(12,2) NOT NULL,
+      payment_mode ENUM('cash','card','bkash','nagad','bank_transfer') DEFAULT 'cash',
+      reference    VARCHAR(100),
+      notes        TEXT,
+      created_by   INT,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id)  REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )`);
+
+  await patch('waste_logs table', `
+    CREATE TABLE IF NOT EXISTS waste_logs (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id     INT NOT NULL,
+      ingredient_id INT NOT NULL,
+      qty           DECIMAL(12,3) NOT NULL,
+      reason        ENUM('spoilage','over_prep','dropped','expired','other') NOT NULL DEFAULT 'other',
+      notes         VARCHAR(255),
+      logged_date   DATE NOT NULL,
+      created_by    INT,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id)    REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id),
+      FOREIGN KEY (created_by)   REFERENCES users(id)
     )`);
 
   await patch('recipes table', `

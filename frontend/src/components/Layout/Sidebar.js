@@ -45,6 +45,7 @@ import {
   CalculatorIcon,
   PauseCircleIcon,
   XCircleIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -80,8 +81,9 @@ const NAV_SECTIONS = [
       { name: 'Recipes & BOM',      href: '/recipes',               icon: ClipboardDocumentListIcon,   roles: ['admin', 'manager'] },
       { name: 'Purchase',           href: '/purchase',              icon: ArchiveBoxIcon,              roles: ['admin', 'manager'] },
       { name: 'Suppliers',          href: '/suppliers',             icon: BuildingStorefrontIcon,      roles: ['admin', 'manager'] },
+      { name: 'Waste Log',          href: '/waste',                 icon: TrashIcon,                   roles: ['admin', 'manager'] },
       { name: 'CRM & Loyalty',      href: '/crm',                   icon: UserGroupIcon,               roles: ['admin'] },
-      { name: 'Expenses',           href: '/expenses',              icon: CurrencyDollarIcon,          roles: ['admin'] },
+      { name: 'Expenses',           href: '/expenses',              icon: CurrencyDollarIcon,          roles: ['admin', 'manager'] },
       { name: 'Accounting',         href: '/accounting',            icon: BanknotesIcon,               roles: ['admin'] },
       { name: 'HR & Payroll',       href: '/hr',                    icon: ClipboardDocumentCheckIcon,  roles: ['admin'] },
       { name: 'QR Ordering',        href: '/qr-ordering',           icon: QrCodeIcon,                  roles: ['admin'] },

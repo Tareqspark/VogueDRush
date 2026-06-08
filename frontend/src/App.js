@@ -34,6 +34,7 @@ const Inventory            = lazy(() => import('./pages/Inventory'));
 const Purchase             = lazy(() => import('./pages/Purchase'));
 const Suppliers            = lazy(() => import('./pages/Suppliers'));
 const Recipes              = lazy(() => import('./pages/Recipes'));
+const WasteLog             = lazy(() => import('./pages/WasteLog'));
 const CRM                  = lazy(() => import('./pages/CRM'));
 const Expenses             = lazy(() => import('./pages/Expenses'));
 const Accounting           = lazy(() => import('./pages/Accounting'));
@@ -521,9 +522,19 @@ const AppContent = () => {
                   <Route
                     path="/expenses/*"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Expenses />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/waste/*"
+                    element={
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
+                        <Layout>
+                          <WasteLog />
                         </Layout>
                       </ProtectedRoute>
                     }

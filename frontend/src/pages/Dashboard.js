@@ -192,6 +192,21 @@ const Dashboard = () => {
     { enabled: !!revenueViewOrder }
   );
 
+  // Inventory quick-view: low-stock alerts + today's COGS
+  const { data: stockAlerts } = useQuery(
+    'dash-stock-alerts',
+    () => api.get('/inventory/alerts').then(r => r.data),
+    { refetchInterval: 120000, enabled: user?.role === 'admin' || user?.role === 'manager' }
+  );
+  const { data: todayCogs } = useQuery(
+    'dash-today-cogs',
+    () => {
+      const today = new Date().toISOString().split('T')[0];
+      return api.get('/inventory/reports/cogs', { params: { from: today, to: today } }).then(r => r.data);
+    },
+    { refetchInterval: 120000, enabled: user?.role === 'admin' || user?.role === 'manager' }
+  );
+
   // Listen for real-time updates
   useEffect(() => {
     // Socket event listeners would be set up here
@@ -332,6 +347,56 @@ const Dashboard = () => {
               reservations={todayReservations?.reservations || []}
               isLoading={reservationsLoading}
             />
+          )}
+          {/* Inventory quick-view */}
+          {(user?.role === 'admin' || user?.role === 'manager') && (
+            <div className="card p-5 space-y-3">
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <span className="h-5 w-1 rounded-full bg-amber-500 inline-block" />
+                Inventory Snapshot
+              </h3>
+              {/* COGS vs Revenue today */}
+              {todayCogs && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-emerald-50 rounded-xl p-3">
+                    <p className="text-xs text-emerald-600 font-semibold">Revenue</p>
+                    <p className="text-lg font-black text-emerald-700">৳{parseFloat(todayCogs.total_revenue || 0).toFixed(0)}</p>
+                  </div>
+                  <div className="bg-rose-50 rounded-xl p-3">
+                    <p className="text-xs text-rose-600 font-semibold">COGS</p>
+                    <p className="text-lg font-black text-rose-700">
+                      ৳{parseFloat(todayCogs.total_cogs || 0).toFixed(0)}
+                      {todayCogs.avg_food_cost_pct && (
+                        <span className="text-xs font-semibold ml-1 opacity-70">({todayCogs.avg_food_cost_pct}%)</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {/* Low stock alerts */}
+              {stockAlerts?.alerts?.length > 0 ? (
+                <div>
+                  <p className="text-xs font-semibold text-amber-600 mb-1.5">
+                    {stockAlerts.alerts.length} item{stockAlerts.alerts.length !== 1 ? 's' : ''} low / critical
+                  </p>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                    {stockAlerts.alerts.slice(0, 6).map(a => (
+                      <div key={a.id} className="flex items-center justify-between text-xs">
+                        <span className="text-slate-700 truncate flex-1">{a.name}</span>
+                        <span className={`ml-2 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0 ${
+                          a.stock_status === 'critical' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{a.current_stock} {a.unit}</span>
+                      </div>
+                    ))}
+                    {stockAlerts.alerts.length > 6 && (
+                      <p className="text-xs text-slate-400 text-center">+{stockAlerts.alerts.length - 6} more</p>
+                    )}
+                  </div>
+                </div>
+              ) : stockAlerts ? (
+                <p className="text-xs text-emerald-600 font-semibold">All stock levels healthy</p>
+              ) : null}
+            </div>
           )}
         </div>
       </div>
