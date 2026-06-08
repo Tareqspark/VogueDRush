@@ -398,16 +398,17 @@ const scopeBranch = (req, _res, next) => {
   const user = req.user;
   if (!user) return next();
 
-  if (user.branch_id) {
-    // Non-admin staff locked to their branch
+  if (user.role === 'admin') {
+    // Admin: use X-Branch-Id header to scope, or null = all branches
+    const headerBranch = req.headers['x-branch-id'];
+    req.scopedBranchId = headerBranch ? parseInt(headerBranch, 10) : null;
+  } else if (user.branch_id) {
+    // Any non-admin role with a branch assigned: always locked to that branch
     req.scopedBranchId = user.branch_id;
-  } else if (user.role === 'admin') {
-    // Admin uses whatever branch the header says, or null (all)
-    const headerBranch = req.headers['x-branch-id'];
-    req.scopedBranchId = headerBranch ? parseInt(headerBranch) : null;
   } else {
-    const headerBranch = req.headers['x-branch-id'];
-    req.scopedBranchId = headerBranch ? parseInt(headerBranch) : null;
+    // Non-admin with no branch assigned — use -1 so queries return nothing
+    // rather than leaking all-branch data (fail closed)
+    req.scopedBranchId = -1;
   }
   next();
 };
