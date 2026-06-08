@@ -1,18 +1,25 @@
 const express = require('express');
 const { findOne, findMany, query } = require('../config/database');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, scopeBranch } = require('../middleware/auth');
 const { validateDateRange } = require('../middleware/validation');
 
 const router = express.Router();
+router.use(scopeBranch);
+
+// Returns a branch-filter SQL fragment (safe — scopedBranchId is an integer set by scopeBranch)
+const bf = (req, alias = 'o') =>
+  req.scopedBranchId
+    ? `AND ${alias ? alias + '.' : ''}branch_id = ${parseInt(req.scopedBranchId, 10)}`
+    : '';
 
 // Sales reports - daily, weekly, monthly
 router.get('/sales', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date, period = 'daily' } = req.query;
-    
+
     let dateFormat = '';
     let groupBy = '';
-    
+
     switch (period) {
       case 'daily':
         dateFormat = '%Y-%m-%d';
@@ -29,17 +36,17 @@ router.get('/sales', validateDateRange, async (req, res) => {
       default:
         return res.status(400).json({ error: 'Invalid period. Use daily, weekly, or monthly' });
     }
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
-      dateFilter = 'WHERE DATE(o.created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     const salesQuery = `
-      SELECT 
+      SELECT
         ${groupBy} as period,
         COUNT(*) as order_count,
         SUM(o.total_amount) as revenue,
@@ -52,14 +59,14 @@ router.get('/sales', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN o.order_type = 'delivery' THEN 1 END) as delivery_count,
         COUNT(CASE WHEN o.order_type = 'direct' THEN 1 END) as direct_count
       FROM orders o
-      WHERE o.status = 'done' ${dateFilter ? 'AND ' + dateFilter.substring(6) : ''}
+      WHERE o.status = 'done' ${dateFilter} ${bf(req)}
       GROUP BY ${groupBy}
       ORDER BY period DESC
       LIMIT 100
     `;
-    
+
     const salesData = await query(salesQuery, values);
-    
+
     // Calculate totals
     const totals = salesData.reduce((acc, row) => ({
       total_orders: acc.total_orders + parseInt(row.order_count),
@@ -74,15 +81,15 @@ router.get('/sales', validateDateRange, async (req, res) => {
       total_service_charge: 0,
       total_discount: 0
     });
-    
+
     totals.avg_order_value = totals.total_orders > 0 ? totals.total_revenue / totals.total_orders : 0;
-    
+
     res.json({
       period,
       sales_data: salesData,
       summary: totals
     });
-    
+
   } catch (error) {
     console.error('Get sales report error:', error);
     res.status(500).json({ error: 'Failed to generate sales report' });
@@ -93,18 +100,18 @@ router.get('/sales', validateDateRange, async (req, res) => {
 router.get('/menu-performance', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date, limit = 50 } = req.query;
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     // Category performance
     const categoryQuery = `
-      SELECT 
+      SELECT
         fc.name as category_name,
         fc.icon as category_icon,
         COUNT(DISTINCT oi.order_id) as orders_count,
@@ -116,16 +123,16 @@ router.get('/menu-performance', validateDateRange, async (req, res) => {
       JOIN food_items fi ON oi.food_item_id = fi.id
       JOIN food_categories fc ON fi.category_id = fc.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.status IN ('done') ${dateFilter}
+      WHERE o.status IN ('done') ${dateFilter} ${bf(req)}
       GROUP BY fc.id, fc.name, fc.icon
       ORDER BY total_revenue DESC
     `;
-    
+
     const categoryData = await query(categoryQuery, values);
-    
+
     // Item performance
     const itemQuery = `
-      SELECT 
+      SELECT
         fi.id,
         fi.name as item_name,
         fc.name as category_name,
@@ -139,17 +146,17 @@ router.get('/menu-performance', validateDateRange, async (req, res) => {
       JOIN food_items fi ON oi.food_item_id = fi.id
       JOIN food_categories fc ON fi.category_id = fc.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.status IN ('done') ${dateFilter}
+      WHERE o.status IN ('done') ${dateFilter} ${bf(req)}
       GROUP BY fi.id, fi.name, fc.name
       ORDER BY total_revenue DESC
       LIMIT ?
     `;
-    
+
     const itemData = await query(itemQuery, [...values, parseInt(limit)]);
-    
+
     // Most profitable items
     const profitQuery = `
-      SELECT 
+      SELECT
         fi.name as item_name,
         fc.name as category_name,
         SUM(oi.quantity) as total_quantity,
@@ -161,21 +168,21 @@ router.get('/menu-performance', validateDateRange, async (req, res) => {
       JOIN food_items fi ON oi.food_item_id = fi.id
       JOIN food_categories fc ON fi.category_id = fc.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.status IN ('done') ${dateFilter}
+      WHERE o.status IN ('done') ${dateFilter} ${bf(req)}
       GROUP BY fi.id, fi.name, fc.name
       HAVING total_quantity > 0
       ORDER BY estimated_profit DESC
       LIMIT 20
     `;
-    
+
     const profitData = await query(profitQuery, values);
-    
+
     res.json({
       category_performance: categoryData,
       item_performance: itemData,
       most_profitable: profitData
     });
-    
+
   } catch (error) {
     console.error('Get menu performance report error:', error);
     res.status(500).json({ error: 'Failed to generate menu performance report' });
@@ -186,24 +193,24 @@ router.get('/menu-performance', validateDateRange, async (req, res) => {
 router.get('/staff-performance', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date, user_id } = req.query;
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     let userFilter = '';
     if (user_id) {
       userFilter = 'AND o.waiter_id = ?';
       values.push(user_id);
     }
-    
+
     // Staff performance overview
     const staffQuery = `
-      SELECT 
+      SELECT
         u.id,
         u.username,
         u.full_name,
@@ -218,32 +225,32 @@ router.get('/staff-performance', validateDateRange, async (req, res) => {
         ROUND(COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) * 100.0 / COUNT(o.id), 2) as cancellation_rate
       FROM users u
       LEFT JOIN orders o ON u.id = o.waiter_id
-      WHERE u.is_active = 1 ${dateFilter} ${userFilter}
+      WHERE u.is_active = 1 ${dateFilter} ${userFilter} ${bf(req)}
       GROUP BY u.id, u.username, u.full_name, u.role
       ORDER BY total_revenue DESC
     `;
-    
+
     const staffData = await query(staffQuery, values);
-    
+
     // Hourly performance for selected staff or overall
     const hourlyQuery = `
-      SELECT 
+      SELECT
         HOUR(o.created_at) as hour,
         COUNT(o.id) as order_count,
         SUM(o.total_amount) as revenue,
         AVG(o.total_amount) as avg_order_value
       FROM orders o
-      WHERE o.status IN ('done') ${dateFilter} ${user_id ? 'AND o.waiter_id = ?' : ''}
+      WHERE o.status IN ('done') ${dateFilter} ${user_id ? 'AND o.waiter_id = ?' : ''} ${bf(req)}
       GROUP BY HOUR(o.created_at)
       ORDER BY hour
     `;
-    
+
     const hourlyValues = user_id ? [...values, user_id] : values;
     const hourlyData = await query(hourlyQuery, hourlyValues);
-    
+
     // Top performing items by staff
     const topItemsQuery = `
-      SELECT 
+      SELECT
         u.username,
         u.full_name,
         fi.name as item_name,
@@ -254,21 +261,21 @@ router.get('/staff-performance', validateDateRange, async (req, res) => {
       JOIN orders o ON u.id = o.waiter_id
       JOIN order_items oi ON o.id = oi.order_id
       JOIN food_items fi ON oi.food_item_id = fi.id
-      WHERE o.status IN ('done') ${dateFilter} ${user_id ? 'AND o.waiter_id = ?' : ''}
+      WHERE o.status IN ('done') ${dateFilter} ${user_id ? 'AND o.waiter_id = ?' : ''} ${bf(req)}
       GROUP BY u.id, u.username, u.full_name, fi.name
       ORDER BY total_revenue DESC
       LIMIT 50
     `;
-    
+
     const topItemsValues = user_id ? [...values, user_id] : values;
     const topItemsData = await query(topItemsQuery, topItemsValues);
-    
+
     res.json({
       staff_performance: staffData,
       hourly_performance: hourlyData,
       top_items: topItemsData
     });
-    
+
   } catch (error) {
     console.error('Get staff performance report error:', error);
     res.status(500).json({ error: 'Failed to generate staff performance report' });
@@ -279,18 +286,18 @@ router.get('/staff-performance', validateDateRange, async (req, res) => {
 router.get('/delivery', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     // Delivery overview
     const deliveryQuery = `
-      SELECT 
+      SELECT
         COUNT(*) as total_deliveries,
         SUM(o.total_amount) as total_revenue,
         AVG(o.total_amount) as avg_order_value,
@@ -303,30 +310,30 @@ router.get('/delivery', validateDateRange, async (req, res) => {
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
       LEFT JOIN delivery_tracking dt ON dt.delivery_detail_id = dd.id
-      WHERE o.order_type = 'delivery' ${dateFilter}
+      WHERE o.order_type = 'delivery' ${dateFilter} ${bf(req)}
     `;
-    
+
     const deliveryOverview = await query(deliveryQuery, values);
-    
+
     // Delivery status breakdown
     const statusQuery = `
-      SELECT 
+      SELECT
         dd.delivery_status,
         COUNT(*) as count,
         SUM(o.total_amount) as total_value,
         AVG(o.total_amount) as avg_value
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
-      WHERE o.order_type = 'delivery' ${dateFilter}
+      WHERE o.order_type = 'delivery' ${dateFilter} ${bf(req)}
       GROUP BY dd.delivery_status
       ORDER BY count DESC
     `;
-    
+
     const statusData = await query(statusQuery, values);
-    
+
     // Delivery time analysis
     const timeAnalysisQuery = `
-      SELECT 
+      SELECT
         DATE(o.created_at) as delivery_date,
         COUNT(*) as delivery_count,
         AVG(TIMESTAMPDIFF(MINUTE, o.created_at, dt.actual_delivery_time)) as avg_delivery_time,
@@ -335,20 +342,20 @@ router.get('/delivery', validateDateRange, async (req, res) => {
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
       LEFT JOIN delivery_tracking dt ON dt.delivery_detail_id = dd.id
-      WHERE o.order_type = 'delivery' 
+      WHERE o.order_type = 'delivery'
         AND dd.delivery_status = 'delivered'
         AND dt.actual_delivery_time IS NOT NULL
-        ${dateFilter}
+        ${dateFilter} ${bf(req)}
       GROUP BY DATE(o.created_at)
       ORDER BY delivery_date DESC
       LIMIT 30
     `;
-    
+
     const timeAnalysisData = await query(timeAnalysisQuery, values);
-    
+
     // Payment collection analysis
     const paymentQuery = `
-      SELECT 
+      SELECT
         COUNT(*) as total_deliveries,
         COUNT(CASE WHEN dd.advance_payment > 0 THEN 1 END) as with_advance_payment,
         SUM(dd.advance_payment) as total_advance_amount,
@@ -357,18 +364,18 @@ router.get('/delivery', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN dd.due_amount > 0 AND dd.delivery_status = 'delivered' THEN 1 END) as delivered_with_due
       FROM orders o
       JOIN delivery_details dd ON o.id = dd.order_id
-      WHERE o.order_type = 'delivery' ${dateFilter}
+      WHERE o.order_type = 'delivery' ${dateFilter} ${bf(req)}
     `;
-    
+
     const paymentData = await query(paymentQuery, values);
-    
+
     res.json({
       overview: deliveryOverview[0],
       status_breakdown: statusData,
       time_analysis: timeAnalysisData,
       payment_analysis: paymentData[0]
     });
-    
+
   } catch (error) {
     console.error('Get delivery report error:', error);
     res.status(500).json({ error: 'Failed to generate delivery report' });
@@ -379,18 +386,18 @@ router.get('/delivery', validateDateRange, async (req, res) => {
 router.get('/cancellations', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(o.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     // Cancellation overview
     const cancellationQuery = `
-      SELECT 
+      SELECT
         COUNT(*) as total_cancelled,
         SUM(o.total_amount) as lost_revenue,
         AVG(o.total_amount) as avg_cancelled_order_value,
@@ -398,29 +405,29 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN o.order_type = 'delivery' THEN 1 END) as delivery_cancelled,
         COUNT(CASE WHEN o.order_type = 'direct' THEN 1 END) as direct_cancelled
       FROM orders o
-      WHERE o.status = 'cancelled' ${dateFilter}
+      WHERE o.status = 'cancelled' ${dateFilter} ${bf(req)}
     `;
-    
+
     const cancellationOverview = await query(cancellationQuery, values);
-    
+
     // Cancellation by order type
     const typeQuery = `
-      SELECT 
+      SELECT
         o.order_type,
         COUNT(*) as cancellation_count,
         SUM(o.total_amount) as lost_revenue,
         AVG(o.total_amount) as avg_order_value
       FROM orders o
-      WHERE o.status = 'cancelled' ${dateFilter}
+      WHERE o.status = 'cancelled' ${dateFilter} ${bf(req)}
       GROUP BY o.order_type
       ORDER BY cancellation_count DESC
     `;
-    
+
     const typeData = await query(typeQuery, values);
-    
+
     // Kitchen item cancellations
     const kitchenCancellationQuery = `
-      SELECT 
+      SELECT
         fi.name as item_name,
         fc.name as category_name,
         COUNT(kq.id) as cancellation_count,
@@ -431,38 +438,38 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
       JOIN food_items fi ON oi.food_item_id = fi.id
       JOIN food_categories fc ON fi.category_id = fc.id
       JOIN orders o ON kq.order_id = o.id
-      WHERE kq.status = 'cancelled' ${dateFilter}
+      WHERE kq.status = 'cancelled' ${dateFilter} ${bf(req)}
       GROUP BY fi.id, fi.name, fc.name
       ORDER BY cancellation_count DESC
       LIMIT 50
     `;
-    
+
     const kitchenData = await query(kitchenCancellationQuery, values);
-    
+
     // Cancellation trends over time
     const trendQuery = `
-      SELECT 
+      SELECT
         DATE(o.created_at) as cancellation_date,
         COUNT(*) as cancellation_count,
         SUM(o.total_amount) as lost_revenue,
         COUNT(CASE WHEN o.order_type = 'dine_in' THEN 1 END) as dine_in_cancelled,
         COUNT(CASE WHEN o.order_type = 'delivery' THEN 1 END) as delivery_cancelled
       FROM orders o
-      WHERE o.status = 'cancelled' ${dateFilter}
+      WHERE o.status = 'cancelled' ${dateFilter} ${bf(req)}
       GROUP BY DATE(o.created_at)
       ORDER BY cancellation_date DESC
       LIMIT 30
     `;
-    
+
     const trendData = await query(trendQuery, values);
-    
+
     res.json({
       overview: cancellationOverview[0],
       by_order_type: typeData,
       kitchen_items: kitchenData,
       trends: trendData
     });
-    
+
   } catch (error) {
     console.error('Get cancellation report error:', error);
     res.status(500).json({ error: 'Failed to generate cancellation report' });
@@ -472,45 +479,49 @@ router.get('/cancellations', validateDateRange, async (req, res) => {
 // Bill-by-bill details
 router.get('/bill-details', validateDateRange, async (req, res) => {
   try {
-    const { 
-      start_date, 
-      end_date, 
-      page = 1, 
+    const {
+      start_date,
+      end_date,
+      page = 1,
       limit = 100,
       order_type,
       payment_method,
       min_amount,
-      max_amount 
+      max_amount
     } = req.query;
-    
+
     const limitInt = parseInt(limit, 10) || 100;
     const offsetInt = (parseInt(page, 10) - 1) * limitInt;
     let whereClause = 'o.status IN ("done", "cancelled")';
     let values = [];
-    
+
     if (start_date && end_date) {
       whereClause += ' AND DATE(o.created_at) BETWEEN ? AND ?';
       values.push(start_date, end_date);
     }
-    
+
     if (order_type) {
       whereClause += ' AND o.order_type = ?';
       values.push(order_type);
     }
-    
+
     if (min_amount) {
       whereClause += ' AND o.total_amount >= ?';
       values.push(parseFloat(min_amount));
     }
-    
+
     if (max_amount) {
       whereClause += ' AND o.total_amount <= ?';
       values.push(parseFloat(max_amount));
     }
-    
+
+    if (req.scopedBranchId) {
+      whereClause += ` AND o.branch_id = ${parseInt(req.scopedBranchId, 10)}`;
+    }
+
     // Get bill details
     const billsQuery = `
-      SELECT 
+      SELECT
         o.id,
         o.order_number,
         o.order_type,
@@ -542,9 +553,9 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
       ORDER BY o.created_at DESC
       LIMIT ? OFFSET ?
     `;
-    
+
     const bills = await query(billsQuery, [...values, limitInt, offsetInt]);
-    
+
     // Get order items for each bill
     for (const bill of bills) {
       const items = await query(`
@@ -554,18 +565,18 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
         WHERE oi.order_id = ?
         ORDER BY oi.created_at
       `, [bill.id]);
-      
+
       bill.items = items;
     }
-    
+
     // Get total count
     const countQuery = `SELECT COUNT(*) as total FROM orders o WHERE ${whereClause}`;
     const countResult = await query(countQuery, values);
     const total = countResult[0].total;
-    
+
     // Calculate summary statistics
     const summaryQuery = `
-      SELECT 
+      SELECT
         COUNT(*) as total_bills,
         SUM(o.total_amount) as total_revenue,
         AVG(o.total_amount) as avg_bill_amount,
@@ -577,10 +588,10 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
       FROM orders o
       WHERE ${whereClause}
     `;
-    
+
     const summaryResult = await query(summaryQuery, values);
     const summary = summaryResult[0];
-    
+
     res.json({
       bills,
       pagination: {
@@ -591,7 +602,7 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
       },
       summary
     });
-    
+
   } catch (error) {
     console.error('Get bill details error:', error);
     res.status(500).json({ error: 'Failed to fetch bill details' });
@@ -602,18 +613,18 @@ router.get('/bill-details', validateDateRange, async (req, res) => {
 router.get('/payment-methods', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    
+
     let dateFilter = '';
     let values = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(p.created_at) BETWEEN ? AND ?';
       values = [start_date, end_date];
     }
-    
+
     // Payment method breakdown
     const paymentQuery = `
-      SELECT 
+      SELECT
         p.payment_method,
         COUNT(*) as transaction_count,
         SUM(p.amount) as total_amount,
@@ -625,32 +636,33 @@ router.get('/payment-methods', validateDateRange, async (req, res) => {
         COUNT(CASE WHEN o.order_type = 'direct' THEN 1 END) as direct_count
       FROM payments p
       JOIN orders o ON p.order_id = o.id
-      WHERE p.status = 'completed' ${dateFilter}
+      WHERE p.status = 'completed' ${dateFilter} ${bf(req)}
       GROUP BY p.payment_method
       ORDER BY total_amount DESC
     `;
-    
+
     const paymentData = await query(paymentQuery, values);
-    
+
     // Payment trends over time
     const trendQuery = `
-      SELECT 
+      SELECT
         DATE(p.created_at) as payment_date,
         p.payment_method,
         COUNT(*) as transaction_count,
         SUM(p.amount) as total_amount
       FROM payments p
-      WHERE p.status = 'completed' ${dateFilter}
+      JOIN orders o ON p.order_id = o.id
+      WHERE p.status = 'completed' ${dateFilter} ${bf(req)}
       GROUP BY DATE(p.created_at), p.payment_method
       ORDER BY payment_date DESC, p.payment_method
       LIMIT 100
     `;
-    
+
     const trendData = await query(trendQuery, values);
-    
+
     // Payment method by order type
     const orderTypeQuery = `
-      SELECT 
+      SELECT
         o.order_type,
         p.payment_method,
         COUNT(*) as count,
@@ -658,19 +670,19 @@ router.get('/payment-methods', validateDateRange, async (req, res) => {
         AVG(p.amount) as avg_amount
       FROM payments p
       JOIN orders o ON p.order_id = o.id
-      WHERE p.status = 'completed' ${dateFilter}
+      WHERE p.status = 'completed' ${dateFilter} ${bf(req)}
       GROUP BY o.order_type, p.payment_method
       ORDER BY o.order_type, total_amount DESC
     `;
-    
+
     const orderTypeData = await query(orderTypeQuery, values);
-    
+
     res.json({
       payment_breakdown: paymentData,
       payment_trends: trendData,
       by_order_type: orderTypeData
     });
-    
+
   } catch (error) {
     console.error('Get payment methods report error:', error);
     res.status(500).json({ error: 'Failed to generate payment methods report' });
@@ -682,10 +694,10 @@ router.get('/export/:type', validateDateRange, async (req, res) => {
   try {
     const { type } = req.params;
     const { start_date, end_date, format = 'json' } = req.query;
-    
+
     let data = [];
     let filename = '';
-    
+
     switch (type) {
       case 'orders':
         data = await query(`
@@ -693,38 +705,39 @@ router.get('/export/:type', validateDateRange, async (req, res) => {
           FROM orders o
           LEFT JOIN users u ON o.waiter_id = u.id
           LEFT JOIN tables t ON o.table_id = t.id
-          WHERE DATE(o.created_at) BETWEEN ? AND ?
+          WHERE DATE(o.created_at) BETWEEN ? AND ? ${bf(req)}
           ORDER BY o.created_at DESC
         `, [start_date, end_date]);
         filename = `orders_${start_date}_to_${end_date}`;
         break;
-        
+
       case 'payments':
         data = await query(`
           SELECT p.*, o.order_number, o.order_type, u.username as waiter_name
           FROM payments p
           JOIN orders o ON p.order_id = o.id
           LEFT JOIN users u ON o.waiter_id = u.id
-          WHERE DATE(p.created_at) BETWEEN ? AND ?
+          WHERE DATE(p.created_at) BETWEEN ? AND ? ${bf(req)}
           ORDER BY p.created_at DESC
         `, [start_date, end_date]);
         filename = `payments_${start_date}_to_${end_date}`;
         break;
-        
+
       case 'menu-items':
         data = await query(`
           SELECT fi.*, fc.name as category_name
           FROM food_items fi
           LEFT JOIN food_categories fc ON fi.category_id = fc.id
+          WHERE 1=1 ${bf(req, 'fi')}
           ORDER BY fc.display_order ASC, fi.display_order ASC
         `);
         filename = `menu_items_${new Date().toISOString().split('T')[0]}`;
         break;
-        
+
       default:
         return res.status(400).json({ error: 'Invalid export type' });
     }
-    
+
     if (format === 'csv') {
       // Convert to CSV format
       const csv = convertToCSV(data);
@@ -740,7 +753,7 @@ router.get('/export/:type', validateDateRange, async (req, res) => {
         data
       });
     }
-    
+
   } catch (error) {
     console.error('Export data error:', error);
     res.status(500).json({ error: 'Failed to export data' });
@@ -750,10 +763,10 @@ router.get('/export/:type', validateDateRange, async (req, res) => {
 // Helper function to convert data to CSV
 const convertToCSV = (data) => {
   if (data.length === 0) return '';
-  
+
   const headers = Object.keys(data[0]);
   const csvHeaders = headers.join(',');
-  
+
   const csvRows = data.map(row => {
     return headers.map(header => {
       const value = row[header];
@@ -765,7 +778,7 @@ const convertToCSV = (data) => {
       return value;
     }).join(',');
   });
-  
+
   return [csvHeaders, ...csvRows].join('\n');
 };
 
@@ -788,7 +801,7 @@ router.get('/today-revenue', async (req, res) => {
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
-      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ?
+      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ? ${bf(req)}
       ORDER BY o.created_at DESC
       LIMIT ? OFFSET ?
     `, [from, to, limitInt, offset]);
@@ -800,6 +813,7 @@ router.get('/today-revenue', async (req, res) => {
              SUM(discount_amount) AS total_discount,
              SUM(service_charge)  AS total_service_charge
       FROM orders WHERE status = 'done' AND DATE(created_at) BETWEEN ? AND ?
+      ${bf(req, '')}
     `, [from, to]);
 
     res.json({ orders, totals, pagination: { page: parseInt(page), limit: limitInt, total: parseInt(totals.total_orders) } });
@@ -821,7 +835,7 @@ router.get('/vat-report', validateDateRange, async (req, res) => {
              SUM(total_amount)    AS gross,
              SUM(vat_amount)      AS vat_collected,
              SUM(subtotal)        AS net_sales
-      FROM orders WHERE status = 'done' ${df}
+      FROM orders WHERE status = 'done' ${df} ${bf(req, '')}
       GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 90
     `, v);
 
@@ -830,7 +844,7 @@ router.get('/vat-report', validateDateRange, async (req, res) => {
              SUM(total_amount) AS total_revenue,
              SUM(vat_amount)   AS total_vat,
              SUM(subtotal)     AS total_net_sales
-      FROM orders WHERE status = 'done' ${df}
+      FROM orders WHERE status = 'done' ${df} ${bf(req, '')}
     `, v);
 
     res.json({ daily, totals });
@@ -851,21 +865,21 @@ router.get('/discount-report', validateDateRange, async (req, res) => {
              SUM(o.discount_amount)  AS total_discount,
              AVG(o.discount_amount)  AS avg_discount
       FROM orders o JOIN users u ON o.waiter_id = u.id
-      WHERE o.status = 'done' AND o.discount_amount > 0 ${df}
+      WHERE o.status = 'done' AND o.discount_amount > 0 ${df} ${bf(req)}
       GROUP BY u.id, u.full_name, u.username ORDER BY total_discount DESC
     `, v);
 
     const [totals] = await query(`
       SELECT COUNT(*)                AS orders_with_discount,
              SUM(discount_amount)    AS total_discount
-      FROM orders WHERE status = 'done' AND discount_amount > 0 ${dfu}
+      FROM orders WHERE status = 'done' AND discount_amount > 0 ${dfu} ${bf(req, '')}
     `, v);
 
     const orders = await query(`
       SELECT o.id, o.order_number, o.customer_name, o.order_type, o.total_amount,
              o.discount_amount, o.created_at, u.full_name AS waiter_name
       FROM orders o JOIN users u ON o.waiter_id = u.id
-      WHERE o.status = 'done' AND o.discount_amount > 0 ${df}
+      WHERE o.status = 'done' AND o.discount_amount > 0 ${df} ${bf(req)}
       ORDER BY o.discount_amount DESC LIMIT 200
     `, v);
 
@@ -889,7 +903,7 @@ router.get('/user-summary', validateDateRange, async (req, res) => {
              SUM(o.vat_amount)       AS total_vat,
              AVG(o.total_amount)     AS avg_order
       FROM users u
-      LEFT JOIN orders o  ON o.waiter_id = u.id AND o.status = 'done' ${df}
+      LEFT JOIN orders o  ON o.waiter_id = u.id AND o.status = 'done' ${df} ${bf(req)}
       LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
       WHERE u.is_active = 1
       GROUP BY u.id, u.full_name, u.username ORDER BY total_sales DESC
@@ -912,7 +926,7 @@ router.get('/collection-summary', validateDateRange, async (req, res) => {
              SUM(CASE WHEN order_type = 'delivery' THEN total_amount ELSE 0 END) AS delivery,
              SUM(CASE WHEN order_type = 'direct'   THEN total_amount ELSE 0 END) AS takeaway,
              SUM(total_amount) AS daily_total
-      FROM orders WHERE status = 'done' ${df}
+      FROM orders WHERE status = 'done' ${df} ${bf(req, '')}
       GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 90
     `, v);
 
@@ -921,7 +935,7 @@ router.get('/collection-summary', validateDateRange, async (req, res) => {
              SUM(CASE WHEN order_type = 'delivery' THEN total_amount ELSE 0 END) AS delivery,
              SUM(CASE WHEN order_type = 'direct'   THEN total_amount ELSE 0 END) AS takeaway,
              SUM(total_amount) AS grand_total
-      FROM orders WHERE status = 'done' ${df}
+      FROM orders WHERE status = 'done' ${df} ${bf(req, '')}
     `, v);
 
     res.json({ rows, totals });
@@ -933,7 +947,7 @@ router.get('/payment-collection', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const df  = start_date && end_date ? 'AND DATE(p.created_at) BETWEEN ? AND ?' : '';
-    const dfu = start_date && end_date ? 'AND DATE(created_at) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(p.created_at) BETWEEN ? AND ?' : '';
     const v   = start_date && end_date ? [start_date, end_date] : [];
     const df2 = start_date && end_date ? 'AND DATE(o.created_at) BETWEEN ? AND ?' : '';
 
@@ -944,23 +958,27 @@ router.get('/payment-collection', validateDateRange, async (req, res) => {
              SUM(CASE WHEN p.payment_method = 'bkash' THEN p.amount ELSE 0 END) AS bkash,
              SUM(CASE WHEN p.payment_method = 'nagad' THEN p.amount ELSE 0 END) AS nagad,
              SUM(p.amount) AS daily_total
-      FROM payments p WHERE p.status = 'completed' ${df}
+      FROM payments p
+      JOIN orders o ON o.id = p.order_id
+      WHERE p.status = 'completed' ${df} ${bf(req)}
       GROUP BY DATE(p.created_at) ORDER BY date DESC LIMIT 90
     `, v);
 
     const [totals] = await query(`
-      SELECT SUM(CASE WHEN payment_method = 'cash'  THEN amount ELSE 0 END) AS cash,
-             SUM(CASE WHEN payment_method = 'card'  THEN amount ELSE 0 END) AS card,
-             SUM(CASE WHEN payment_method = 'bkash' THEN amount ELSE 0 END) AS bkash,
-             SUM(CASE WHEN payment_method = 'nagad' THEN amount ELSE 0 END) AS nagad,
-             SUM(amount) AS grand_total
-      FROM payments WHERE status = 'completed' ${dfu}
+      SELECT SUM(CASE WHEN p.payment_method = 'cash'  THEN p.amount ELSE 0 END) AS cash,
+             SUM(CASE WHEN p.payment_method = 'card'  THEN p.amount ELSE 0 END) AS card,
+             SUM(CASE WHEN p.payment_method = 'bkash' THEN p.amount ELSE 0 END) AS bkash,
+             SUM(CASE WHEN p.payment_method = 'nagad' THEN p.amount ELSE 0 END) AS nagad,
+             SUM(p.amount) AS grand_total
+      FROM payments p
+      JOIN orders o ON o.id = p.order_id
+      WHERE p.status = 'completed' ${dfu} ${bf(req)}
     `, v);
 
     const due = await query(`
       SELECT DATE(o.created_at) AS date, SUM(dd.due_amount) AS due_total
       FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
-      WHERE dd.due_amount > 0 AND o.status = 'done' ${df2}
+      WHERE dd.due_amount > 0 AND o.status = 'done' ${df2} ${bf(req)}
       GROUP BY DATE(o.created_at) ORDER BY date DESC LIMIT 90
     `, v);
 
@@ -979,14 +997,14 @@ router.get('/yearly-summary', async (req, res) => {
              SUM(total_amount)    AS revenue,
              SUM(vat_amount)      AS vat,
              SUM(discount_amount) AS discount
-      FROM orders WHERE status = 'done' AND YEAR(created_at) = ?
+      FROM orders WHERE status = 'done' AND YEAR(created_at) = ? ${bf(req, '')}
       GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month
     `, [parseInt(year)]);
 
     const previous = await query(`
       SELECT DATE_FORMAT(created_at, '%Y-%m') AS month,
              SUM(total_amount) AS revenue
-      FROM orders WHERE status = 'done' AND YEAR(created_at) = ?
+      FROM orders WHERE status = 'done' AND YEAR(created_at) = ? ${bf(req, '')}
       GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month
     `, [parseInt(year) - 1]);
 
@@ -1006,7 +1024,7 @@ router.get('/due-collection', validateDateRange, async (req, res) => {
              o.total_amount, dd.advance_payment, dd.due_amount,
              dd.delivery_status, o.created_at
       FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
-      WHERE dd.due_amount > 0 ${df}
+      WHERE dd.due_amount > 0 ${df} ${bf(req)}
       ORDER BY dd.due_amount DESC LIMIT 200
     `, v);
 
@@ -1015,7 +1033,7 @@ router.get('/due-collection', validateDateRange, async (req, res) => {
              SUM(dd.due_amount)      AS total_due,
              SUM(dd.advance_payment) AS total_advance
       FROM orders o JOIN delivery_details dd ON dd.order_id = o.id
-      WHERE dd.due_amount > 0 ${df}
+      WHERE dd.due_amount > 0 ${df} ${bf(req)}
     `, v);
 
     res.json({ orders, totals });
@@ -1029,7 +1047,7 @@ router.get('/menu-list', async (req, res) => {
       SELECT fc.name AS category, fi.name, fi.price, fi.promotional_price,
              fi.is_available, fi.preparation_time, fi.vat_rate
       FROM food_items fi JOIN food_categories fc ON fi.category_id = fc.id
-      WHERE fc.is_active = 1
+      WHERE fc.is_active = 1 ${bf(req, 'fi')}
       ORDER BY fc.display_order ASC, fi.display_order ASC, fi.name ASC
     `);
 
@@ -1059,13 +1077,13 @@ router.get('/hold-report', validateDateRange, async (req, res) => {
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
-      WHERE o.status = 'hold' ${df}
+      WHERE o.status = 'hold' ${df} ${bf(req)}
       ORDER BY o.updated_at DESC
     `, v);
 
     const [totals] = await query(`
       SELECT COUNT(*) AS count, SUM(total_amount) AS total_value
-      FROM orders WHERE status = 'hold' ${dfu}
+      FROM orders WHERE status = 'hold' ${dfu} ${bf(req, '')}
     `, v);
 
     res.json({ orders, totals });
@@ -1077,6 +1095,7 @@ router.get('/reservations-report', validateDateRange, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const df = start_date && end_date ? 'AND DATE(r.reservation_date) BETWEEN ? AND ?' : '';
+    const dfu = start_date && end_date ? 'AND DATE(reservation_date) BETWEEN ? AND ?' : '';
     const v  = start_date && end_date ? [start_date, end_date] : [];
 
     const reservations = await query(`
@@ -1084,7 +1103,7 @@ router.get('/reservations-report', validateDateRange, async (req, res) => {
              r.reservation_date, r.reservation_time, r.status,
              r.special_requests, r.created_at, t.table_number
       FROM reservations r LEFT JOIN tables t ON r.table_id = t.id
-      WHERE 1=1 ${df}
+      WHERE 1=1 ${df} ${bf(req, 'r')}
       ORDER BY r.reservation_date DESC, r.reservation_time DESC LIMIT 200
     `, v);
 
@@ -1094,7 +1113,7 @@ router.get('/reservations-report', validateDateRange, async (req, res) => {
              SUM(CASE WHEN status = 'completed'  THEN 1 ELSE 0 END) AS completed,
              SUM(CASE WHEN status = 'cancelled'  THEN 1 ELSE 0 END) AS cancelled,
              SUM(party_size) AS total_covers
-      FROM reservations WHERE 1=1 ${df}
+      FROM reservations WHERE 1=1 ${dfu} ${bf(req, '')}
     `, v);
 
     res.json({ reservations, totals });
@@ -1124,7 +1143,7 @@ router.get('/customer-search', validateDateRange, async (req, res) => {
              COALESCE(SUM(dd.due_amount), 0) AS total_due
       FROM orders o
       LEFT JOIN delivery_details dd ON dd.order_id = o.id
-      WHERE o.status IN ('done') ${df} ${customerFilter}
+      WHERE o.status IN ('done') ${df} ${customerFilter} ${bf(req)}
       GROUP BY o.customer_name, o.customer_phone
       ORDER BY total_spent DESC LIMIT 200
     `, v);
@@ -1150,7 +1169,7 @@ router.get('/takeaway-report', validateDateRange, async (req, res) => {
       FROM orders o
       LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
       LEFT JOIN users u ON o.waiter_id = u.id
-      WHERE o.order_type = 'direct' ${df}
+      WHERE o.order_type = 'direct' ${df} ${bf(req)}
       ORDER BY o.created_at DESC LIMIT 200
     `, v);
 
@@ -1159,7 +1178,7 @@ router.get('/takeaway-report', validateDateRange, async (req, res) => {
              SUM(total_amount)    AS revenue,
              SUM(vat_amount)      AS vat,
              SUM(discount_amount) AS discount
-      FROM orders WHERE order_type = 'direct' ${dfu}
+      FROM orders WHERE order_type = 'direct' ${dfu} ${bf(req, '')}
     `, v);
 
     res.json({ orders, totals });
@@ -1183,7 +1202,7 @@ router.get('/daily-sales-detail', validateDateRange, async (req, res) => {
       FROM orders o
       LEFT JOIN users u  ON o.waiter_id = u.id
       LEFT JOIN payments p ON p.order_id = o.id AND p.status = 'completed'
-      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ?
+      WHERE o.status = 'done' AND DATE(o.created_at) BETWEEN ? AND ? ${bf(req)}
       ORDER BY o.created_at DESC LIMIT 300
     `, [from, to]);
 
@@ -1204,7 +1223,7 @@ router.get('/daily-sales-detail', validateDateRange, async (req, res) => {
              SUM(total_amount) AS total_revenue,
              SUM(vat_amount)   AS total_vat,
              SUM(discount_amount) AS total_discount
-      FROM orders WHERE status = 'done' AND DATE(created_at) BETWEEN ? AND ?
+      FROM orders WHERE status = 'done' AND DATE(created_at) BETWEEN ? AND ? ${bf(req, '')}
     `, [from, to]);
 
     res.json({ orders, totals });
