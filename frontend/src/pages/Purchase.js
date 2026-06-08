@@ -1,289 +1,511 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PlusIcon, DocumentCheckIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, EyeIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
-const TABS = ['Purchase Orders', 'Goods Receiving', '3-Way Match', 'Invoices', 'Returns', 'Landed Cost'];
-
-const PATH_MAP = {
-  '':             'Purchase Orders',
-  'orders':       'Purchase Orders',
-  'receiving':    'Goods Receiving',
-  'matching':     '3-Way Match',
-  'invoices':     'Invoices',
-  'returns':      'Returns',
-  'landed-cost':  'Landed Cost',
-};
-const TAB_PATH = {
-  'Purchase Orders':  'orders',
-  'Goods Receiving':  'receiving',
-  '3-Way Match':      'matching',
-  'Invoices':         'invoices',
-  'Returns':          'returns',
-  'Landed Cost':      'landed-cost',
+const TABS = ['Purchase Orders', 'Goods Receiving'];
+const STATUS_STYLE = {
+  draft:     'bg-slate-100 text-slate-600',
+  confirmed: 'bg-sky-50   text-sky-700',
+  partial:   'bg-amber-50 text-amber-700',
+  received:  'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-rose-50  text-rose-600',
 };
 
-const POS = [
-  { id: 1, poNumber: 'PO-2026-05-013', supplier: 'Fresh Farm Ltd.',    date: '2026-05-05', expected: '2026-05-08', items: 8,  total: 15200.00, status: 'draft',           by: 'System (Auto)' },
-  { id: 2, poNumber: 'PO-2026-05-012', supplier: 'Agro Foods',         date: '2026-05-04', expected: '2026-05-07', items: 6,  total: 8250.00,  status: 'confirmed',       by: 'Admin' },
-  { id: 3, poNumber: 'PO-2026-05-011', supplier: 'Fresh Farm Ltd.',    date: '2026-05-03', expected: '2026-05-06', items: 4,  total: 12400.00, status: 'partial_receipt', by: 'Manager' },
-  { id: 4, poNumber: 'PO-2026-05-010', supplier: 'Dairy Direct',       date: '2026-05-02', expected: '2026-05-05', items: 3,  total: 5600.00,  status: 'received',        by: 'Admin' },
-  { id: 5, poNumber: 'PO-2026-05-009', supplier: 'Mediterranean Co.',  date: '2026-05-01', expected: '2026-05-04', items: 2,  total: 3700.00,  status: 'received',        by: 'Admin' },
-  { id: 6, poNumber: 'PO-2026-04-085', supplier: 'Grain Masters',      date: '2026-04-28', expected: '2026-05-01', items: 5,  total: 9800.00,  status: 'cancelled',       by: 'Manager' },
-];
+// ── PO Create Modal ───────────────────────────────────────────────────────────
+function POModal({ api, onClose, onSaved }) {
+  const [form, setForm] = useState({ supplier_id: '', expected_date: '', notes: '' });
+  const [lines, setLines] = useState([{ ingredient_id: '', qty: 1, unit_price: 0 }]);
+  const [saving, setSaving] = useState(false);
 
-const GRNS = [
-  { id: 1, grnNumber: 'GRN-2026-047', po: 'PO-2026-05-010', supplier: 'Dairy Direct',      date: '2026-05-04', lines: 3, received: 3, variance: 0,  status: 'completed' },
-  { id: 2, grnNumber: 'GRN-2026-046', po: 'PO-2026-05-011', supplier: 'Fresh Farm Ltd.',   date: '2026-05-03', lines: 4, received: 3, variance: -1, status: 'partial' },
-  { id: 3, grnNumber: 'GRN-2026-045', po: 'PO-2026-05-009', supplier: 'Mediterranean Co.',  date: '2026-05-02', lines: 2, received: 2, variance: 0,  status: 'completed' },
-  { id: 4, grnNumber: 'GRN-2026-044', po: 'PO-2026-04-080', supplier: 'Agro Foods',         date: '2026-04-30', lines: 6, received: 6, variance: 0,  status: 'completed' },
-];
+  const { data: suppData } = useQuery('po-suppliers', () => api.get('/suppliers').then(r => r.data));
+  const { data: ingData }  = useQuery('po-ingredients', () => api.get('/inventory').then(r => r.data));
+  const suppliers    = suppData?.suppliers || [];
+  const ingredients  = ingData?.ingredients || [];
 
-const INVOICES = [
-  { id: 1, invNumber: 'INV-DC-089',  supplier: 'Dairy Direct',      date: '2026-05-04', amount: 5600.00,  match: 'matched',  due: '2026-06-03', status: 'approved', daysLeft: 29 },
-  { id: 2, invNumber: 'INV-FF-234',  supplier: 'Fresh Farm Ltd.',   date: '2026-05-03', amount: 9300.00,  match: 'variance', due: '2026-05-18', status: 'hold',     daysLeft: 13 },
-  { id: 3, invNumber: 'INV-MC-056',  supplier: 'Mediterranean Co.', date: '2026-05-02', amount: 3700.00,  match: 'matched',  due: '2026-05-17', status: 'paid',     daysLeft: 0 },
-  { id: 4, invNumber: 'INV-AF-178',  supplier: 'Agro Foods',        date: '2026-04-15', amount: 6800.00,  match: 'matched',  due: '2026-05-01', status: 'overdue',  daysLeft: -4 },
-  { id: 5, invNumber: 'INV-GM-033',  supplier: 'Grain Masters',     date: '2026-04-10', amount: 4200.00,  match: 'matched',  due: '2026-04-25', status: 'overdue',  daysLeft: -10 },
-];
+  const setLine = (i, k, v) => setLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
+  const addLine = () => setLines(ls => [...ls, { ingredient_id: '', qty: 1, unit_price: 0 }]);
+  const removeLine = i => setLines(ls => ls.filter((_, idx) => idx !== i));
 
-const RETURNS = [
-  { id: 1, ref: 'RET-2026-012', po: 'PO-2026-04-080', supplier: 'Fresh Farm Ltd.',  date: '2026-05-01', items: 2, amount: 840.00,  reason: 'quality',     status: 'approved' },
-  { id: 2, ref: 'RET-2026-011', po: 'PO-2026-04-075', supplier: 'Dairy Direct',     date: '2026-04-28', items: 1, amount: 420.00,  reason: 'expired',     status: 'received' },
-  { id: 3, ref: 'RET-2026-010', po: 'PO-2026-04-070', supplier: 'Agro Foods',       date: '2026-04-25', items: 3, amount: 1260.00, reason: 'wrong_item',  status: 'pending' },
-];
+  const total = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.unit_price) || 0), 0);
 
-const PO_STYLE   = { draft: 'bg-slate-100 text-slate-600', confirmed: 'bg-sky-100 text-sky-700', partial_receipt: 'bg-amber-100 text-amber-700', received: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-rose-100 text-rose-700' };
-const INV_STYLE  = { approved: 'bg-emerald-100 text-emerald-700', hold: 'bg-amber-100 text-amber-700', paid: 'bg-slate-100 text-slate-600', overdue: 'bg-rose-100 text-rose-700' };
-const RET_STYLE  = { approved: 'bg-emerald-50 text-emerald-700', received: 'bg-sky-50 text-sky-700', pending: 'bg-amber-50 text-amber-700' };
-
-export default function Purchase() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const subPath  = location.pathname.replace(/^\/purchase\/?/, '');
-  const tab      = PATH_MAP[subPath] || 'Purchase Orders';
-  const setTab   = (t) => navigate(`/purchase/${TAB_PATH[t]}`);
-
-  const activePOValue    = POS.filter(p => ['confirmed', 'partial_receipt'].includes(p.status)).reduce((s, p) => s + p.total, 0);
-  const pendingGRN       = POS.filter(p => p.status === 'confirmed').length;
-  const overdueAmount    = INVOICES.filter(i => i.status === 'overdue').reduce((s, i) => s + i.amount, 0);
-  const returnValue      = RETURNS.reduce((s, r) => s + r.amount, 0);
+  const submit = async e => {
+    e.preventDefault();
+    if (!form.supplier_id) return toast.error('Select a supplier');
+    const validLines = lines.filter(l => l.ingredient_id && parseFloat(l.qty) > 0);
+    if (!validLines.length) return toast.error('Add at least one item');
+    setSaving(true);
+    try {
+      await api.post('/purchase-orders', { ...form, lines: validLines });
+      toast.success('Purchase order created');
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setSaving(false); }
+  };
 
   return (
-    <div className="animate-fade-in space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-black text-slate-800">Purchase Management</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Module B · PO Lifecycle · GRN · 3-Way Match · Invoices · Returns · Landed Cost</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-100 p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-black text-slate-800">New Purchase Order</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
-        <button className="btn btn-primary btn-sm"><PlusIcon className="h-4 w-4" /> Create PO</button>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier *</label>
+              <select className="input w-full" value={form.supplier_id} onChange={e => setForm(p => ({ ...p, supplier_id: e.target.value }))} required>
+                <option value="">— select —</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Expected Date</label>
+              <input className="input w-full" type="date" value={form.expected_date} onChange={e => setForm(p => ({ ...p, expected_date: e.target.value }))} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
+              <input className="input w-full" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Items</p>
+              <button type="button" onClick={addLine} className="btn btn-ghost btn-xs flex items-center gap-1"><PlusIcon className="h-3.5 w-3.5" /> Add Row</button>
+            </div>
+            <div className="space-y-2">
+              {lines.map((line, i) => (
+                <div key={i} className="grid grid-cols-[1fr_100px_110px_32px] gap-2 items-center">
+                  <select className="input" value={line.ingredient_id} onChange={e => setLine(i, 'ingredient_id', e.target.value)}>
+                    <option value="">— ingredient —</option>
+                    {ingredients.map(ing => <option key={ing.id} value={ing.id}>{ing.name} ({ing.sku})</option>)}
+                  </select>
+                  <input className="input text-right" type="number" min="0.001" step="any" placeholder="Qty" value={line.qty} onChange={e => setLine(i, 'qty', e.target.value)} />
+                  <input className="input text-right" type="number" min="0" step="0.01" placeholder="Unit Price" value={line.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} />
+                  <button type="button" onClick={() => removeLine(i)} className="btn btn-ghost btn-icon btn-xs text-rose-400"><XMarkIcon className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+            <p className="text-right mt-2 text-sm font-bold text-slate-700">Total: ৳{total.toFixed(2)}</p>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn btn-primary flex-1">{saving ? 'Creating…' : 'Create PO'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── PO Detail / Receive Modal ─────────────────────────────────────────────────
+function PODetailModal({ api, poId, onClose, onAction }) {
+  const { data, isLoading } = useQuery(
+    ['po-detail', poId],
+    () => api.get(`/purchase-orders/${poId}`).then(r => r.data),
+    { enabled: !!poId }
+  );
+  const [acting, setActing] = useState(false);
+  const [receiving, setReceiving] = useState(false);
+  const [receiveForm, setReceiveForm] = useState({});
+  const [grnNotes, setGrnNotes] = useState('');
+
+  const po    = data?.po;
+  const items = data?.items || [];
+
+  const act = async action => {
+    setActing(true);
+    try {
+      await api.put(`/purchase-orders/${poId}/${action}`);
+      toast.success(action === 'confirm' ? 'PO Confirmed' : 'PO Cancelled');
+      onAction();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setActing(false); }
+  };
+
+  const initReceive = () => {
+    const init = {};
+    items.forEach(item => {
+      const remaining = parseFloat(item.qty_ordered) - parseFloat(item.qty_received || 0);
+      init[item.id] = { qty_received: remaining > 0 ? remaining : 0, unit_cost: item.unit_price };
+    });
+    setReceiveForm(init);
+    setReceiving(true);
+  };
+
+  const submitReceive = async () => {
+    setActing(true);
+    try {
+      const receiveLines = Object.entries(receiveForm)
+        .filter(([, v]) => parseFloat(v.qty_received) > 0)
+        .map(([item_id, v]) => ({ item_id: parseInt(item_id), qty_received: parseFloat(v.qty_received), unit_cost: parseFloat(v.unit_cost) }));
+      if (!receiveLines.length) { toast.error('Enter at least one received qty'); setActing(false); return; }
+      await api.post(`/purchase-orders/${poId}/receive`, { lines: receiveLines, notes: grnNotes });
+      toast.success('GRN created — stock updated');
+      onAction();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setActing(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-100 p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        {isLoading ? (
+          <div className="text-center py-12 text-slate-400">Loading…</div>
+        ) : !po ? (
+          <div className="text-center py-12 text-slate-400">Not found</div>
+        ) : (
+          <>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="font-black text-slate-800">{po.po_number}</h2>
+                <p className="text-sm text-slate-500">{po.supplier_name} · {new Date(po.created_at).toLocaleDateString()}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${STATUS_STYLE[po.status]}`}>{po.status}</span>
+                <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+            </div>
+
+            <table className="w-full text-sm mb-4">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-3 py-2 text-left">Item</th>
+                  <th className="px-3 py-2 text-right">Ordered</th>
+                  <th className="px-3 py-2 text-right">Received</th>
+                  <th className="px-3 py-2 text-right">Unit Price</th>
+                  {receiving && <th className="px-3 py-2 text-right">Receive Now</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {items.map(item => {
+                  const remaining = parseFloat(item.qty_ordered) - parseFloat(item.qty_received || 0);
+                  return (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2 font-medium text-slate-700">{item.ingredient_name}</td>
+                      <td className="px-3 py-2 text-right">{item.qty_ordered} {item.unit}</td>
+                      <td className="px-3 py-2 text-right text-emerald-600">{item.qty_received || 0}</td>
+                      <td className="px-3 py-2 text-right">৳{parseFloat(item.unit_price).toFixed(2)}</td>
+                      {receiving && (
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            className="input w-24 text-right"
+                            type="number" min="0" max={remaining} step="any"
+                            value={receiveForm[item.id]?.qty_received ?? remaining}
+                            onChange={e => setReceiveForm(p => ({ ...p, [item.id]: { ...p[item.id], qty_received: e.target.value } }))}
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-slate-500">Total: <span className="font-bold text-slate-800">৳{parseFloat(po.total_amount).toFixed(2)}</span></p>
+            </div>
+
+            {receiving && (
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">GRN Notes</label>
+                <input className="input w-full" value={grnNotes} onChange={e => setGrnNotes(e.target.value)} placeholder="Optional notes…" />
+              </div>
+            )}
+
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={onClose} className="btn btn-ghost">Close</button>
+              {po.status === 'draft' && (
+                <>
+                  <button onClick={() => act('confirm')} disabled={acting} className="btn btn-primary">Confirm</button>
+                  <button onClick={() => act('cancel')} disabled={acting} className="btn btn-ghost text-rose-500">Cancel PO</button>
+                </>
+              )}
+              {(po.status === 'confirmed' || po.status === 'partial') && !receiving && (
+                <button onClick={initReceive} className="btn btn-primary">Receive Stock</button>
+              )}
+              {receiving && (
+                <button onClick={submitReceive} disabled={acting} className="btn btn-primary">{acting ? 'Saving…' : 'Confirm Receipt'}</button>
+              )}
+              {po.status === 'confirmed' && !receiving && (
+                <button onClick={() => act('cancel')} disabled={acting} className="btn btn-ghost text-rose-500">Cancel PO</button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Standalone GRN Modal ──────────────────────────────────────────────────────
+function StandaloneGRNModal({ api, onClose, onSaved }) {
+  const [form, setForm] = useState({ supplier_id: '', invoice_number: '', notes: '' });
+  const [lines, setLines] = useState([{ ingredient_id: '', qty_received: 1, unit_cost: 0 }]);
+  const [saving, setSaving] = useState(false);
+
+  const { data: suppData } = useQuery('po-suppliers', () => api.get('/suppliers').then(r => r.data));
+  const { data: ingData }  = useQuery('po-ingredients', () => api.get('/inventory').then(r => r.data));
+  const suppliers    = suppData?.suppliers || [];
+  const ingredients  = ingData?.ingredients || [];
+
+  const setLine = (i, k, v) => setLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
+
+  const submit = async e => {
+    e.preventDefault();
+    const validLines = lines.filter(l => l.ingredient_id && parseFloat(l.qty_received) > 0);
+    if (!validLines.length) return toast.error('Add at least one item');
+    setSaving(true);
+    try {
+      await api.post('/purchase-orders/grn/standalone', { ...form, lines: validLines });
+      toast.success('Direct receipt recorded');
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-100 p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-black text-slate-800">Direct Receipt (No PO)</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier</label>
+              <select className="input w-full" value={form.supplier_id} onChange={e => setForm(p => ({ ...p, supplier_id: e.target.value }))}>
+                <option value="">— optional —</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Number</label>
+              <input className="input w-full" value={form.invoice_number} onChange={e => setForm(p => ({ ...p, invoice_number: e.target.value }))} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
+              <input className="input w-full" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Items</p>
+              <button type="button" onClick={() => setLines(ls => [...ls, { ingredient_id: '', qty_received: 1, unit_cost: 0 }])} className="btn btn-ghost btn-xs flex items-center gap-1"><PlusIcon className="h-3.5 w-3.5" /> Add Row</button>
+            </div>
+            {lines.map((line, i) => (
+              <div key={i} className="grid grid-cols-[1fr_100px_110px_32px] gap-2 items-center mb-2">
+                <select className="input" value={line.ingredient_id} onChange={e => setLine(i, 'ingredient_id', e.target.value)}>
+                  <option value="">— ingredient —</option>
+                  {ingredients.map(ing => <option key={ing.id} value={ing.id}>{ing.name} ({ing.sku})</option>)}
+                </select>
+                <input className="input text-right" type="number" min="0.001" step="any" placeholder="Qty" value={line.qty_received} onChange={e => setLine(i, 'qty_received', e.target.value)} />
+                <input className="input text-right" type="number" min="0" step="0.01" placeholder="Unit Cost" value={line.unit_cost} onChange={e => setLine(i, 'unit_cost', e.target.value)} />
+                <button type="button" onClick={() => setLines(ls => ls.filter((_, idx) => idx !== i))} className="btn btn-ghost btn-icon btn-xs text-rose-400"><XMarkIcon className="h-4 w-4" /></button>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn btn-primary flex-1">{saving ? 'Saving…' : 'Record Receipt'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── GRN Detail Modal ──────────────────────────────────────────────────────────
+function GRNDetailModal({ api, grnId, onClose }) {
+  const { data, isLoading } = useQuery(
+    ['grn-detail', grnId],
+    () => api.get(`/purchase-orders/grn/${grnId}`).then(r => r.data),
+    { enabled: !!grnId }
+  );
+  const grn   = data?.grn;
+  const items = data?.items || [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-lg rounded-2xl border border-slate-100 p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        {isLoading ? <div className="text-center py-12 text-slate-400">Loading…</div> : !grn ? <div className="text-center py-12 text-slate-400">Not found</div> : (
+          <>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="font-black text-slate-800">{grn.grn_number}</h2>
+                <p className="text-sm text-slate-500">{grn.supplier_name || 'Direct'} · {new Date(grn.created_at).toLocaleDateString()}</p>
+              </div>
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <table className="w-full text-sm mb-4">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                <tr>
+                  <th className="px-3 py-2 text-left">Item</th>
+                  <th className="px-3 py-2 text-right">Qty</th>
+                  <th className="px-3 py-2 text-right">Unit Cost</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {items.map(item => (
+                  <tr key={item.id}>
+                    <td className="px-3 py-2 text-slate-700">{item.ingredient_name}</td>
+                    <td className="px-3 py-2 text-right">{item.qty_received} {item.unit}</td>
+                    <td className="px-3 py-2 text-right">৳{parseFloat(item.unit_cost).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">৳{(parseFloat(item.qty_received) * parseFloat(item.unit_cost)).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500">{grn.notes || ''}</span>
+              <span className="font-black text-slate-800">Total: ৳{parseFloat(grn.total_cost || 0).toFixed(2)}</span>
+            </div>
+            <button onClick={onClose} className="btn btn-ghost w-full mt-4">Close</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function PurchasePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { api } = useAuth();
+
+  const seg = location.pathname.split('/purchase')[1]?.replace('/', '') || '';
+  const activeTab = seg === 'grn' ? 'Goods Receiving' : 'Purchase Orders';
+
+  const [showNewPO, setShowNewPO] = useState(false);
+  const [showStandaloneGRN, setShowStandaloneGRN] = useState(false);
+  const [viewPO, setViewPO] = useState(null);
+  const [viewGRN, setViewGRN] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [grnDates, setGrnDates] = useState({ from: '', to: '' });
+
+  const { data: poData, isLoading: poLoading } = useQuery(
+    ['purchase-orders', statusFilter],
+    () => api.get('/purchase-orders', { params: { status: statusFilter || undefined } }).then(r => r.data),
+    { keepPreviousData: true, enabled: activeTab === 'Purchase Orders' }
+  );
+
+  const { data: grnData, isLoading: grnLoading } = useQuery(
+    ['grns', grnDates],
+    () => api.get('/purchase-orders/grn/list', { params: { from: grnDates.from || undefined, to: grnDates.to || undefined } }).then(r => r.data),
+    { keepPreviousData: true, enabled: activeTab === 'Goods Receiving' }
+  );
+
+  const pos  = poData?.orders || [];
+  const grns = grnData?.grns  || [];
+
+  const filteredPOs = search
+    ? pos.filter(p => p.po_number.includes(search) || (p.supplier_name || '').toLowerCase().includes(search.toLowerCase()))
+    : pos;
+
+  const refresh = () => {
+    qc.invalidateQueries('purchase-orders');
+    qc.invalidateQueries('grns');
+    qc.invalidateQueries('po-ingredients');
+  };
+
+  const goTab = tab => navigate(tab === 'Purchase Orders' ? '/purchase' : '/purchase/grn');
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-slate-800">Procurement</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Purchase orders and goods receiving</p>
+        </div>
+        <div className="flex gap-2">
+          {activeTab === 'Purchase Orders' && (
+            <button onClick={() => setShowNewPO(true)} className="btn btn-primary flex items-center gap-1.5">
+              <PlusIcon className="h-4 w-4" /> New PO
+            </button>
+          )}
+          {activeTab === 'Goods Receiving' && (
+            <button onClick={() => setShowStandaloneGRN(true)} className="btn btn-ghost flex items-center gap-1.5">
+              <PlusIcon className="h-4 w-4" /> Direct Receipt
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Active PO Value',   val: `AED ${(activePOValue/1000).toFixed(1)}K`, sub: `${POS.filter(p=>['confirmed','partial_receipt'].includes(p.status)).length} open POs`, color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
-          { label: 'Pending GRN',       val: pendingGRN,                                sub: 'Awaiting receipt',      color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-          { label: 'Invoice Overdue',   val: `AED ${overdueAmount.toLocaleString()}`,   sub: '2 suppliers overdue',   color: 'text-rose-700',    bg: 'bg-rose-50',    border: 'border-rose-200' },
-          { label: 'Return Value MTD',  val: `AED ${returnValue.toLocaleString()}`,     sub: `${RETURNS.length} returns`, color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
-        ].map(k => (
-          <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
-            <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
-            <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
-            <p className="text-xs text-slate-500">{k.sub}</p>
-          </div>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+        {TABS.map(tab => (
+          <button key={tab} onClick={() => goTab(tab)}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {tab}
+          </button>
         ))}
       </div>
 
-      <div className="card overflow-hidden">
-        <div className="flex border-b border-slate-100 overflow-x-auto">
-          {TABS.map(t => (
-            <button key={t} type="button" onClick={() => setTab(t)}
-              className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 -mb-px transition-colors ${tab === t ? 'text-sky-700 border-sky-500 bg-sky-50/40' : 'text-slate-500 border-transparent hover:text-slate-700'}`}>
-              {t}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-5">
-          {tab === 'Purchase Orders' && (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead><tr><th>PO Number</th><th>Supplier</th><th>PO Date</th><th>Expected Delivery</th><th>Items</th><th>Total</th><th>Status</th><th>Created By</th></tr></thead>
-                <tbody>
-                  {POS.map(p => (
-                    <tr key={p.id}>
-                      <td><code className="text-xs text-sky-700 font-mono font-bold">{p.poNumber}</code></td>
-                      <td className="font-semibold text-slate-800">{p.supplier}</td>
-                      <td className="text-xs text-slate-500">{p.date}</td>
-                      <td className="text-xs text-slate-500">{p.expected}</td>
-                      <td className="text-center font-bold text-slate-700">{p.items}</td>
-                      <td className="font-mono text-xs font-bold text-slate-700">AED {p.total.toLocaleString()}</td>
-                      <td><span className={`status-badge ${PO_STYLE[p.status]}`}>{p.status.replace('_', ' ')}</span></td>
-                      <td className="text-xs text-slate-500">{p.by}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* ── Purchase Orders tab ── */}
+      {activeTab === 'Purchase Orders' && (
+        <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <div className="relative w-64">
+              <MagnifyingGlassIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input className="input pl-9 w-full" placeholder="PO number / supplier…" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-          )}
+            <select className="input w-36" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="">All Status</option>
+              {['draft','confirmed','partial','received','cancelled'].map(s => (
+                <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+              ))}
+            </select>
+          </div>
 
-          {tab === 'Goods Receiving' && (
-            <div>
-              <p className="text-xs text-slate-500 mb-4">Match received quantities against confirmed POs. Batch/expiry captured at line level.</p>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>GRN Number</th><th>PO Reference</th><th>Supplier</th><th>Date</th><th>Lines</th><th>Received</th><th>Variance</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {GRNS.map(g => (
-                      <tr key={g.id}>
-                        <td><code className="text-xs text-sky-700 font-mono font-bold">{g.grnNumber}</code></td>
-                        <td><code className="text-xs text-violet-700 font-mono">{g.po}</code></td>
-                        <td className="font-semibold text-slate-800">{g.supplier}</td>
-                        <td className="text-xs text-slate-500">{g.date}</td>
-                        <td className="text-center text-slate-600">{g.lines}</td>
-                        <td className="text-center font-bold text-emerald-600">{g.received}</td>
-                        <td className="text-center font-bold">
-                          <span className={g.variance === 0 ? 'text-emerald-600' : 'text-rose-600'}>{g.variance === 0 ? '✓' : g.variance}</span>
-                        </td>
-                        <td><span className={`status-badge ${g.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{g.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {poLoading ? (
+            <div className="text-center py-12 text-slate-400">Loading…</div>
+          ) : filteredPOs.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">
+              <p className="text-lg font-semibold">No purchase orders</p>
+              <p className="text-sm mt-1">Create your first PO to start procurement.</p>
             </div>
-          )}
-
-          {tab === 'Invoices' && (
-            <div>
-              {/* AP Aging buckets */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                {[
-                  { label: 'Current (< 30d)', amount: 'AED 5,600', count: 1, style: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-                  { label: '30 – 60 days',    amount: 'AED 9,300', count: 1, style: 'border-amber-200 bg-amber-50 text-amber-700' },
-                  { label: '60 – 90 days',    amount: 'AED 0',     count: 0, style: 'border-slate-200 bg-slate-50 text-slate-400' },
-                  { label: 'Overdue 90+',     amount: 'AED 11,000',count: 2, style: 'border-rose-200 bg-rose-50 text-rose-700' },
-                ].map(b => (
-                  <div key={b.label} className={`rounded-xl border p-3 ${b.style}`}>
-                    <p className="text-lg font-black">{b.amount}</p>
-                    <p className="text-xs font-semibold">{b.label}</p>
-                    <p className="text-xs opacity-60 mt-0.5">{b.count} invoices</p>
-                  </div>
-                ))}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Invoice #</th><th>Supplier</th><th>Date</th><th>Amount</th><th>3-Way Match</th><th>Due Date</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {INVOICES.map(inv => (
-                      <tr key={inv.id}>
-                        <td><code className="text-xs text-sky-700 font-mono">{inv.invNumber}</code></td>
-                        <td className="font-semibold text-slate-800">{inv.supplier}</td>
-                        <td className="text-xs text-slate-500">{inv.date}</td>
-                        <td className="font-mono text-xs font-bold text-slate-700">AED {inv.amount.toLocaleString()}</td>
-                        <td>
-                          <div className="flex items-center gap-1.5">
-                            <DocumentCheckIcon className={`h-4 w-4 ${inv.match === 'matched' ? 'text-emerald-600' : 'text-rose-500'}`} />
-                            <span className={`status-badge ${inv.match === 'matched' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{inv.match}</span>
-                          </div>
-                        </td>
-                        <td className={`text-xs font-semibold ${inv.daysLeft < 0 ? 'text-rose-600' : inv.daysLeft < 14 ? 'text-amber-600' : 'text-slate-500'}`}>
-                          {inv.due} {inv.daysLeft < 0 ? `(${Math.abs(inv.daysLeft)}d overdue)` : inv.daysLeft > 0 ? `(${inv.daysLeft}d)` : ''}
-                        </td>
-                        <td><span className={`status-badge ${INV_STYLE[inv.status]}`}>{inv.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {tab === 'Returns' && (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead><tr><th>Return Ref</th><th>Original PO</th><th>Supplier</th><th>Date</th><th>Items</th><th>Return Amount</th><th>Reason</th><th>Status</th></tr></thead>
-                <tbody>
-                  {RETURNS.map(r => (
-                    <tr key={r.id}>
-                      <td><code className="text-xs text-sky-700 font-mono font-bold">{r.ref}</code></td>
-                      <td><code className="text-xs text-violet-700 font-mono">{r.po}</code></td>
-                      <td className="font-semibold text-slate-800">{r.supplier}</td>
-                      <td className="text-xs text-slate-500">{r.date}</td>
-                      <td className="text-center">{r.items}</td>
-                      <td className="font-mono text-xs font-bold text-rose-600">AED {r.amount.toLocaleString()}</td>
-                      <td><span className="text-xs capitalize bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.reason.replace('_', ' ')}</span></td>
-                      <td><span className={`status-badge ${RET_STYLE[r.status]}`}>{r.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {tab === '3-Way Match' && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: 'Perfect Match', val: '18', sub: 'PO = GRN = Invoice', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-                  { label: 'Qty Variance',  val: '4',  sub: 'GRN ≠ PO qty',        color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200'  },
-                  { label: 'Price Variance',val: '2',  sub: 'Invoice ≠ PO price',  color: 'text-rose-700',   bg: 'bg-rose-50',    border: 'border-rose-200'   },
-                ].map(k => (
-                  <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
-                    <p className={`text-3xl font-black ${k.color}`}>{k.val}</p>
-                    <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
-                    <p className="text-xs text-slate-500">{k.sub}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>PO Ref</th><th>GRN Ref</th><th>Invoice Ref</th><th>PO Qty</th><th>GRN Qty</th><th>Inv Qty</th><th>PO Price</th><th>Inv Price</th><th>Match Status</th></tr></thead>
-                  <tbody>
-                    {[
-                      { po: 'PO-2248', grn: 'GRN-0881', inv: 'INV-5503', poQty: 20, grnQty: 20, invQty: 20, poPrice: 45.00, invPrice: 45.00, status: 'perfect' },
-                      { po: 'PO-2247', grn: 'GRN-0880', inv: 'INV-5501', poQty: 50, grnQty: 48, invQty: 50, poPrice: 12.00, invPrice: 12.00, status: 'qty-var' },
-                      { po: 'PO-2246', grn: 'GRN-0878', inv: 'INV-5498', poQty: 10, grnQty: 10, invQty: 10, poPrice: 95.00, invPrice: 98.50, status: 'price-var' },
-                      { po: 'PO-2245', grn: 'GRN-0877', inv: 'INV-5495', poQty: 30, grnQty: 30, invQty: 30, poPrice: 22.00, invPrice: 22.00, status: 'perfect' },
-                    ].map((r, i) => (
-                      <tr key={i}>
-                        <td><code className="text-xs text-sky-700">{r.po}</code></td>
-                        <td><code className="text-xs text-slate-600">{r.grn}</code></td>
-                        <td><code className="text-xs text-slate-600">{r.inv}</code></td>
-                        <td className="text-xs font-mono text-slate-700">{r.poQty}</td>
-                        <td className={`text-xs font-mono font-bold ${r.grnQty !== r.poQty ? 'text-amber-700' : 'text-slate-700'}`}>{r.grnQty}</td>
-                        <td className={`text-xs font-mono font-bold ${r.invQty !== r.grnQty ? 'text-amber-700' : 'text-slate-700'}`}>{r.invQty}</td>
-                        <td className="text-xs font-mono text-slate-700">AED {r.poPrice}</td>
-                        <td className={`text-xs font-mono font-bold ${r.invPrice !== r.poPrice ? 'text-rose-700' : 'text-slate-700'}`}>AED {r.invPrice}</td>
-                        <td><span className={`status-badge ${ r.status === 'perfect' ? 'bg-emerald-50 text-emerald-700' : r.status === 'qty-var' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700' }`}>{r.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {tab === 'Landed Cost' && (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead><tr><th>GRN Ref</th><th>Supplier</th><th>Base Cost</th><th>Freight</th><th>Customs</th><th>Handling</th><th>Total Landed</th><th>Method</th><th>Status</th></tr></thead>
-                <tbody>
-                  {[
-                    { grn: 'GRN-0881', supplier: 'Fresh Farm Ltd.',   base: 900.00,  freight: 45.00, customs: 0,     handling: 20.00, method: 'Weight', status: 'posted'  },
-                    { grn: 'GRN-0880', supplier: 'Dairy Direct',      base: 576.00,  freight: 30.00, customs: 0,     handling: 15.00, method: 'Value',  status: 'posted'  },
-                    { grn: 'GRN-0878', supplier: 'Mediterranean Co.', base: 950.00,  freight: 80.00, customs: 45.00, handling: 25.00, method: 'Weight', status: 'pending' },
-                    { grn: 'GRN-0877', supplier: 'Grain Masters',     base: 660.00,  freight: 25.00, customs: 0,     handling: 10.00, method: 'Qty',    status: 'posted'  },
-                  ].map((r, i) => (
-                    <tr key={i}>
-                      <td><code className="text-xs text-sky-700">{r.grn}</code></td>
-                      <td className="text-xs font-semibold text-slate-700">{r.supplier}</td>
-                      <td className="font-mono text-xs text-slate-700">AED {r.base.toFixed(2)}</td>
-                      <td className="font-mono text-xs text-slate-500">AED {r.freight.toFixed(2)}</td>
-                      <td className="font-mono text-xs text-slate-500">{r.customs ? `AED ${r.customs.toFixed(2)}` : '—'}</td>
-                      <td className="font-mono text-xs text-slate-500">AED {r.handling.toFixed(2)}</td>
-                      <td className="font-mono text-xs font-black text-emerald-700">AED {(r.base + r.freight + r.customs + r.handling).toFixed(2)}</td>
-                      <td className="text-xs text-slate-500">{r.method}</td>
-                      <td><span className={`status-badge ${ r.status === 'posted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700' }`}>{r.status}</span></td>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="px-4 py-3 text-left">PO Number</th>
+                    <th className="px-4 py-3 text-left">Supplier</th>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Expected</th>
+                    <th className="px-4 py-3 text-right">Amount</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filteredPOs.map(po => (
+                    <tr key={po.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700">{po.po_number}</td>
+                      <td className="px-4 py-3 text-slate-600">{po.supplier_name || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{new Date(po.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '—'}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-700">৳{parseFloat(po.total_amount).toFixed(2)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLE[po.status]}`}>{po.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => setViewPO(po.id)} className="btn btn-ghost btn-icon btn-xs"><EyeIcon className="h-4 w-4" /></button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -291,7 +513,61 @@ export default function Purchase() {
             </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* ── Goods Receiving tab ── */}
+      {activeTab === 'Goods Receiving' && (
+        <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap items-center">
+            <input type="date" className="input w-36" value={grnDates.from} onChange={e => setGrnDates(p => ({ ...p, from: e.target.value }))} />
+            <input type="date" className="input w-36" value={grnDates.to} onChange={e => setGrnDates(p => ({ ...p, to: e.target.value }))} />
+          </div>
+
+          {grnLoading ? (
+            <div className="text-center py-12 text-slate-400">Loading…</div>
+          ) : grns.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">
+              <p className="text-lg font-semibold">No goods received yet</p>
+              <p className="text-sm mt-1">Receive stock against a PO or add a direct receipt.</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="px-4 py-3 text-left">GRN Number</th>
+                    <th className="px-4 py-3 text-left">PO Reference</th>
+                    <th className="px-4 py-3 text-left">Supplier</th>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-right">Total Cost</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {grns.map(grn => (
+                    <tr key={grn.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700">{grn.grn_number}</td>
+                      <td className="px-4 py-3 text-slate-500">{grn.po_number || <span className="italic text-slate-400">Direct</span>}</td>
+                      <td className="px-4 py-3 text-slate-600">{grn.supplier_name || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{new Date(grn.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-700">৳{parseFloat(grn.total_cost || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => setViewGRN(grn.id)} className="btn btn-ghost btn-icon btn-xs"><EyeIcon className="h-4 w-4" /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modals */}
+      {showNewPO && <POModal api={api} onClose={() => setShowNewPO(false)} onSaved={() => { setShowNewPO(false); refresh(); }} />}
+      {showStandaloneGRN && <StandaloneGRNModal api={api} onClose={() => setShowStandaloneGRN(false)} onSaved={() => { setShowStandaloneGRN(false); refresh(); }} />}
+      {viewPO && <PODetailModal api={api} poId={viewPO} onClose={() => setViewPO(null)} onAction={() => { setViewPO(null); refresh(); }} />}
+      {viewGRN && <GRNDetailModal api={api} grnId={viewGRN} onClose={() => setViewGRN(null)} />}
     </div>
   );
 }

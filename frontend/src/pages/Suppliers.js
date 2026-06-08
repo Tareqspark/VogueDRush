@@ -1,334 +1,366 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
-const TABS = ['Suppliers', 'Ledger', 'Payables Aging', 'Performance', 'ABC Segments'];
+const TABS = ['Suppliers', 'Ledger'];
+const TAB_PATH = { 'Suppliers': '', 'Ledger': 'ledger' };
+const PATH_TAB = { '': 'Suppliers', 'suppliers': 'Suppliers', 'ledger': 'Ledger' };
 
-const PATH_MAP = {
-  '':            'Suppliers',
-  'suppliers':   'Suppliers',
-  'ledger':      'Ledger',
-  'payables':    'Payables Aging',
-  'performance': 'Performance',
-  'segments':    'ABC Segments',
-};
-const TAB_PATH = {
-  'Suppliers':      '',
-  'Ledger':         'ledger',
-  'Payables Aging': 'payables',
-  'Performance':    'performance',
-  'ABC Segments':   'segments',
+const PAYMENT_TERMS = ['COD', 'NET-7', 'NET-15', 'NET-30', 'NET-45', 'NET-60'];
+
+const LEDGER_STYLE = {
+  invoice:     'bg-rose-50   text-rose-700',
+  payment:     'bg-emerald-50 text-emerald-700',
+  debit_note:  'bg-amber-50  text-amber-700',
+  credit_note: 'bg-sky-50    text-sky-700',
 };
 
-const SUPPLIERS = [
-  { id: 1, name: 'Fresh Farm Ltd.',    category: 'Proteins',  contact: 'James O.',  phone: '+971-50-2341234', terms: 'NET-30', balance: 12400.00, score: 92, abc: 'A', status: 'active' },
-  { id: 2, name: 'Dairy Direct',       category: 'Dairy',     contact: 'Sara M.',   phone: '+971-50-3456789', terms: 'NET-30', balance: 5600.00,  score: 88, abc: 'A', status: 'active' },
-  { id: 3, name: 'Agro Foods',         category: 'Dry Goods', contact: 'Ali H.',    phone: '+971-55-4567890', terms: 'NET-45', balance: 14800.00, score: 74, abc: 'A', status: 'active' },
-  { id: 4, name: 'Mediterranean Co.',  category: 'Oils',      contact: 'Marco D.',  phone: '+971-50-5678901', terms: 'NET-15', balance: 3700.00,  score: 81, abc: 'B', status: 'active' },
-  { id: 5, name: 'Grain Masters',      category: 'Grains',    contact: 'Priya S.',  phone: '+971-55-6789012', terms: 'COD',    balance: 0,        score: 65, abc: 'B', status: 'active' },
-  { id: 6, name: 'Beverage World',     category: 'Beverages', contact: 'Tom R.',    phone: '+971-50-7890123', terms: 'NET-30', balance: 2100.00,  score: 55, abc: 'C', status: 'active' },
-  { id: 7, name: 'Premium Spices',     category: 'Spices',    contact: 'Fatima K.', phone: '+971-50-8901234', terms: 'COD',    balance: 0,        score: 70, abc: 'C', status: 'blacklisted' },
-];
+// ── Supplier Form Modal ────────────────────────────────────────────────────────
+function SupplierModal({ api, existing, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name:           existing?.name           || '',
+    contact_person: existing?.contact_person || '',
+    phone:          existing?.phone          || '',
+    email:          existing?.email          || '',
+    address:        existing?.address        || '',
+    category:       existing?.category       || '',
+    payment_terms:  existing?.payment_terms  || 'NET-30',
+    lead_days:      existing?.lead_days      || 3,
+  });
+  const [saving, setSaving] = useState(false);
+  const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
-const LEDGER = [
-  { id: 1, date: '2026-05-05', supplier: 'Fresh Farm Ltd.',  type: 'invoice',  ref: 'INV-FF-234',  debit: 0,       credit: 9300.00, balance: 12400.00 },
-  { id: 2, date: '2026-05-04', supplier: 'Dairy Direct',     type: 'invoice',  ref: 'INV-DC-089',  debit: 0,       credit: 5600.00, balance: 5600.00 },
-  { id: 3, date: '2026-05-03', supplier: 'Agro Foods',       type: 'payment',  ref: 'PAY-2026-041',debit: 8250.00, credit: 0,       balance: 6550.00 },
-  { id: 4, date: '2026-05-02', supplier: 'Fresh Farm Ltd.',  type: 'debit_note',ref: 'DN-2026-012', debit: 840.00,  credit: 0,       balance: 3100.00 },
-  { id: 5, date: '2026-05-01', supplier: 'Agro Foods',       type: 'invoice',  ref: 'INV-AF-178',  debit: 0,       credit: 6800.00, balance: 14800.00 },
-];
+  const submit = async e => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (existing) {
+        await api.put(`/suppliers/${existing.id}`, form);
+        toast.success('Supplier updated');
+      } else {
+        await api.post('/suppliers', form);
+        toast.success('Supplier added');
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setSaving(false); }
+  };
 
-const AGING = [
-  { supplier: 'Agro Foods',         current: 0,       d30: 0,       d60: 6800.00, d90: 0,    overdue: 8000.00, total: 14800.00 },
-  { supplier: 'Fresh Farm Ltd.',    current: 9300.00, d30: 3100.00, d60: 0,       d90: 0,    overdue: 0,       total: 12400.00 },
-  { supplier: 'Dairy Direct',       current: 5600.00, d30: 0,       d60: 0,       d90: 0,    overdue: 0,       total: 5600.00 },
-  { supplier: 'Mediterranean Co.',  current: 3700.00, d30: 0,       d60: 0,       d90: 0,    overdue: 0,       total: 3700.00 },
-  { supplier: 'Beverage World',     current: 0,       d30: 2100.00, d60: 0,       d90: 0,    overdue: 0,       total: 2100.00 },
-];
-
-const PERFORMANCE = [
-  { supplier: 'Fresh Farm Ltd.',   delivery: 94, quality: 97, price: 91, composite: 94, trend: '↑', deliveries: 48 },
-  { supplier: 'Dairy Direct',      delivery: 88, quality: 95, price: 85, composite: 89, trend: '↑', deliveries: 32 },
-  { supplier: 'Agro Foods',        delivery: 72, quality: 88, price: 78, composite: 79, trend: '↓', deliveries: 67 },
-  { supplier: 'Mediterranean Co.', delivery: 85, quality: 90, price: 80, composite: 85, trend: '→', deliveries: 19 },
-  { supplier: 'Grain Masters',     delivery: 61, quality: 78, price: 72, composite: 70, trend: '↓', deliveries: 14 },
-];
-
-const ABC_STYLE = { A: 'bg-emerald-100 text-emerald-800 font-black', B: 'bg-sky-100 text-sky-800 font-black', C: 'bg-slate-100 text-slate-600 font-bold' };
-
-function ScoreBar({ value }) {
-  const color = value >= 85 ? 'bg-emerald-500' : value >= 70 ? 'bg-amber-500' : 'bg-rose-500';
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-md rounded-2xl border border-slate-100 p-6 shadow-xl">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-black text-slate-800">{existing ? 'Edit Supplier' : 'Add Supplier'}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier Name *</label>
+              <input className="input w-full" value={form.name} onChange={set('name')} required />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Contact Person</label>
+              <input className="input w-full" value={form.contact_person} onChange={set('contact_person')} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Category</label>
+              <input className="input w-full" value={form.category} onChange={set('category')} placeholder="e.g. Dairy" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Phone</label>
+              <input className="input w-full" value={form.phone} onChange={set('phone')} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
+              <input className="input w-full" type="email" value={form.email} onChange={set('email')} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Terms</label>
+              <select className="input w-full" value={form.payment_terms} onChange={set('payment_terms')}>
+                {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Lead Days</label>
+              <input className="input w-full" type="number" min="0" value={form.lead_days} onChange={set('lead_days')} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Address</label>
+              <textarea className="input w-full" rows={2} value={form.address} onChange={set('address')} />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn btn-primary flex-1">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
       </div>
-      <span className={`text-xs font-bold ${value >= 85 ? 'text-emerald-700' : value >= 70 ? 'text-amber-700' : 'text-rose-700'}`}>{value}</span>
     </div>
   );
 }
 
-export default function Suppliers() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const subPath  = location.pathname.replace(/^\/suppliers\/?/, '');
-  const tab      = PATH_MAP[subPath] || 'Suppliers';
-  const setTab   = (t) => navigate(TAB_PATH[t] ? `/suppliers/${TAB_PATH[t]}` : '/suppliers');
-  const [search, setSearch] = React.useState('');
+// ── Payment Modal ─────────────────────────────────────────────────────────────
+function PaymentModal({ api, supplier, onClose, onSaved }) {
+  const [form, setForm] = useState({ amount: '', date: new Date().toISOString().split('T')[0], notes: '' });
+  const [saving, setSaving] = useState(false);
+  const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
-  const totalAP       = SUPPLIERS.filter(s => s.status === 'active').reduce((s, x) => s + x.balance, 0);
-  const overdueAP     = AGING.reduce((s, a) => s + a.overdue, 0);
-  const avgScore      = Math.round(PERFORMANCE.reduce((s, p) => s + p.composite, 0) / PERFORMANCE.length);
-  const activeCount   = SUPPLIERS.filter(s => s.status === 'active').length;
-
-  const filtered = SUPPLIERS.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
+  const submit = async e => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.post(`/suppliers/${supplier.id}/payment`, form);
+      toast.success('Payment recorded');
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    } finally { setSaving(false); }
+  };
 
   return (
-    <div className="animate-fade-in space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-black text-slate-800">Supplier Management</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Module C · Supplier CRM · Ledger · AP Aging · Performance · ABC Segmentation</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-100 p-6 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-black text-slate-800">Record Payment — {supplier.name}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
-        <button className="btn btn-primary btn-sm"><PlusIcon className="h-4 w-4" /> Add Supplier</button>
+        <p className="text-sm text-slate-500 mb-4">Outstanding: <span className="font-bold text-rose-600">৳{parseFloat(supplier.balance).toFixed(2)}</span></p>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Amount</label>
+            <input className="input w-full" type="number" step="0.01" value={form.amount} onChange={set('amount')} required />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Date</label>
+            <input className="input w-full" type="date" value={form.date} onChange={set('date')} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
+            <input className="input w-full" value={form.notes} onChange={set('notes')} />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn btn-primary flex-1">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function SuppliersPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { api } = useAuth();
+
+  const seg = location.pathname.split('/suppliers')[1]?.replace('/', '') || '';
+  const activeTab = PATH_TAB[seg] || 'Suppliers';
+
+  const [search, setSearch] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editSupplier, setEditSupplier] = useState(null);
+  const [paymentSupplier, setPaymentSupplier] = useState(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [ledgerDates, setLedgerDates] = useState({ from: '', to: '' });
+
+  const { data: supData, isLoading } = useQuery(
+    ['suppliers', search],
+    () => api.get('/suppliers', { params: { search: search || undefined } }).then(r => r.data),
+    { keepPreviousData: true }
+  );
+
+  const { data: ledgerData, isLoading: ledgerLoading } = useQuery(
+    ['supplier-ledger', selectedSupplierId, ledgerDates],
+    () => api.get(`/suppliers/${selectedSupplierId}/ledger`, { params: { from: ledgerDates.from || undefined, to: ledgerDates.to || undefined } }).then(r => r.data),
+    { enabled: activeTab === 'Ledger' && !!selectedSupplierId }
+  );
+
+  const deleteMutation = useMutation(
+    id => api.delete(`/suppliers/${id}`),
+    {
+      onSuccess: () => { qc.invalidateQueries('suppliers'); toast.success('Supplier removed'); },
+      onError: err => toast.error(err.response?.data?.error || 'Failed')
+    }
+  );
+
+  const refresh = () => { qc.invalidateQueries('suppliers'); qc.invalidateQueries('supplier-ledger'); };
+  const suppliers = supData?.suppliers || [];
+  const ledger = ledgerData?.ledger || [];
+  const ledgerSupplier = ledgerData?.supplier;
+
+  const totalBalance = suppliers.reduce((s, sup) => s + parseFloat(sup.balance || 0), 0);
+
+  const goTab = tab => navigate(tab === 'Suppliers' ? '/suppliers' : '/suppliers/ledger');
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-slate-800">Suppliers</h1>
+          <p className="text-slate-500 text-sm mt-0.5">{suppliers.length} active suppliers · Total payable ৳{totalBalance.toFixed(2)}</p>
+        </div>
+        {activeTab === 'Suppliers' && (
+          <button onClick={() => setShowAddModal(true)} className="btn btn-primary flex items-center gap-1.5">
+            <PlusIcon className="h-4 w-4" /> Add Supplier
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Active Suppliers',  val: activeCount,                           sub: '1 blacklisted',       color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-          { label: 'AP Outstanding',    val: `AED ${(totalAP/1000).toFixed(1)}K`,   sub: 'Total owed',          color: 'text-violet-700',  bg: 'bg-violet-50',  border: 'border-violet-200' },
-          { label: 'Overdue AP',        val: `AED ${overdueAP.toLocaleString()}`,   sub: '> 60 days overdue',   color: 'text-rose-700',    bg: 'bg-rose-50',    border: 'border-rose-200' },
-          { label: 'Avg Perf. Score',   val: `${avgScore}/100`,                     sub: '5 scored suppliers',  color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-        ].map(k => (
-          <div key={k.label} className={`rounded-2xl border ${k.border} ${k.bg} p-4`}>
-            <p className={`text-2xl font-black ${k.color}`}>{k.val}</p>
-            <p className="text-xs font-bold text-slate-700 mt-0.5">{k.label}</p>
-            <p className="text-xs text-slate-500">{k.sub}</p>
-          </div>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+        {TABS.map(tab => (
+          <button key={tab} onClick={() => goTab(tab)}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {tab}
+          </button>
         ))}
       </div>
 
-      <div className="card overflow-hidden">
-        <div className="flex border-b border-slate-100 overflow-x-auto">
-          {TABS.map(t => (
-            <button key={t} type="button" onClick={() => setTab(t)}
-              className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 -mb-px transition-colors ${tab === t ? 'text-sky-700 border-sky-500 bg-sky-50/40' : 'text-slate-500 border-transparent hover:text-slate-700'}`}>
-              {t}
-            </button>
-          ))}
-        </div>
+      {/* ── Suppliers list ── */}
+      {activeTab === 'Suppliers' && (
+        <div className="space-y-3">
+          <div className="relative w-72">
+            <MagnifyingGlassIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input className="input pl-9 w-full" placeholder="Search suppliers…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
 
-        <div className="p-5">
-          {tab === 'Suppliers' && (
-            <div>
-              <div className="flex gap-3 mb-4">
-                <div className="relative flex-1 max-w-xs">
-                  <MagnifyingGlassIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input className="input pl-9 text-sm" placeholder="Search suppliers…" value={search} onChange={e => setSearch(e.target.value)} />
-                </div>
-                <select className="select w-auto text-sm"><option>All ABC</option><option>A-Class</option><option>B-Class</option><option>C-Class</option></select>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Supplier Name</th><th>Category</th><th>Contact</th><th>Terms</th><th>Balance</th><th>Perf. Score</th><th>ABC</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {filtered.map(s => (
-                      <tr key={s.id}>
-                        <td className="font-semibold text-slate-800">{s.name}</td>
-                        <td><span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{s.category}</span></td>
-                        <td className="text-xs text-slate-500">{s.contact} · {s.phone}</td>
-                        <td className="text-xs font-mono text-slate-600">{s.terms}</td>
-                        <td className={`font-mono text-xs font-bold ${s.balance > 0 ? 'text-slate-700' : 'text-slate-400'}`}>{s.balance > 0 ? `AED ${s.balance.toLocaleString()}` : '—'}</td>
-                        <td><ScoreBar value={s.score} /></td>
-                        <td><span className={`status-badge ${ABC_STYLE[s.abc]}`}>{s.abc}</span></td>
-                        <td>
-                          {s.status === 'blacklisted'
-                            ? <span className="status-badge bg-rose-100 text-rose-700">BLACKLISTED</span>
-                            : <span className="status-badge bg-emerald-50 text-emerald-700">Active</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {isLoading ? (
+            <div className="text-center py-12 text-slate-400">Loading…</div>
+          ) : suppliers.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">
+              <p className="text-lg font-semibold">No suppliers yet</p>
+              <p className="text-sm mt-1">Add your first supplier to start procurement.</p>
             </div>
-          )}
-
-          {tab === 'Ledger' && (
-            <div>
-              <div className="flex gap-3 mb-4">
-                <select className="select w-auto text-sm"><option>All Suppliers</option>{SUPPLIERS.map(s => <option key={s.id}>{s.name}</option>)}</select>
-                <select className="select w-auto text-sm"><option>All Types</option><option>Invoice</option><option>Payment</option><option>Debit Note</option></select>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Date</th><th>Supplier</th><th>Type</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-                  <tbody>
-                    {LEDGER.map(l => (
-                      <tr key={l.id}>
-                        <td className="text-xs text-slate-500">{l.date}</td>
-                        <td className="font-semibold text-slate-800">{l.supplier}</td>
-                        <td><span className={`status-badge capitalize ${l.type === 'payment' ? 'bg-emerald-50 text-emerald-700' : l.type === 'debit_note' ? 'bg-rose-50 text-rose-700' : 'bg-sky-50 text-sky-700'}`}>{l.type.replace('_', ' ')}</span></td>
-                        <td><code className="text-xs text-slate-600">{l.ref}</code></td>
-                        <td className="font-mono text-xs text-rose-600">{l.debit > 0 ? `AED ${l.debit.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs text-emerald-600">{l.credit > 0 ? `AED ${l.credit.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs font-bold text-slate-700">AED {l.balance.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {tab === 'Payables Aging' && (
-            <div>
-              <p className="text-xs text-slate-500 mb-4">Outstanding AP by aging bucket. Overdue = past invoice due_date.</p>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Supplier</th>
-                      <th className="text-emerald-700">Current</th>
-                      <th className="text-amber-600">1–30 days</th>
-                      <th className="text-orange-600">31–60 days</th>
-                      <th className="text-rose-600">60–90 days</th>
-                      <th className="text-rose-800">90+ Overdue</th>
-                      <th>Total</th>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Name</th>
+                    <th className="px-4 py-3 text-left">Category</th>
+                    <th className="px-4 py-3 text-left">Contact</th>
+                    <th className="px-4 py-3 text-left">Terms</th>
+                    <th className="px-4 py-3 text-right">Balance</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {suppliers.map(sup => (
+                    <tr key={sup.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-semibold text-slate-800">{sup.name}</td>
+                      <td className="px-4 py-3 text-slate-500">{sup.category || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">
+                        <div>{sup.contact_person || '—'}</div>
+                        {sup.phone && <div className="text-xs text-slate-400">{sup.phone}</div>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold">{sup.payment_terms}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`font-bold ${parseFloat(sup.balance) > 0 ? 'text-rose-600' : 'text-slate-500'}`}>৳{parseFloat(sup.balance).toFixed(2)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {parseFloat(sup.balance) > 0 && (
+                            <button onClick={() => setPaymentSupplier(sup)} className="btn btn-ghost btn-xs text-emerald-600">Pay</button>
+                          )}
+                          <button onClick={() => { setSelectedSupplierId(String(sup.id)); goTab('Ledger'); }} className="btn btn-ghost btn-xs">Ledger</button>
+                          <button onClick={() => setEditSupplier(sup)} className="btn btn-ghost btn-icon btn-xs"><PencilIcon className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => { if (window.confirm('Remove supplier?')) deleteMutation.mutate(sup.id); }} className="btn btn-ghost btn-icon btn-xs text-rose-500"><TrashIcon className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {AGING.map((a, i) => (
-                      <tr key={i}>
-                        <td className="font-semibold text-slate-800">{a.supplier}</td>
-                        <td className="font-mono text-xs text-emerald-700">{a.current > 0 ? `AED ${a.current.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs text-amber-600">{a.d30 > 0 ? `AED ${a.d30.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs text-orange-600">{a.d60 > 0 ? `AED ${a.d60.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs">{a.d90 > 0 ? `AED ${a.d90.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs font-bold text-rose-700">{a.overdue > 0 ? `AED ${a.overdue.toLocaleString()}` : '—'}</td>
-                        <td className="font-mono text-xs font-black text-slate-800">AED {a.total.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
+        </div>
+      )}
 
-          {tab === 'Performance' && (
-            <div>
-              <p className="text-xs text-slate-500 mb-4">Composite score = weighted average of delivery (40%), quality (40%), price compliance (20%).</p>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Supplier</th><th>Deliveries</th><th>On-Time %</th><th>Quality %</th><th>Price Compliance</th><th>Composite Score</th><th>Trend</th></tr></thead>
-                  <tbody>
-                    {PERFORMANCE.map((p, i) => (
-                      <tr key={i}>
-                        <td className="font-semibold text-slate-800">{p.supplier}</td>
-                        <td className="text-center text-slate-600">{p.deliveries}</td>
-                        <td><ScoreBar value={p.delivery} /></td>
-                        <td><ScoreBar value={p.quality} /></td>
-                        <td><ScoreBar value={p.price} /></td>
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <div className="w-24 h-3 bg-slate-100 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${p.composite >= 85 ? 'bg-emerald-500' : p.composite >= 70 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${p.composite}%` }} />
-                            </div>
-                            <span className="text-sm font-black text-slate-700">{p.composite}</span>
-                          </div>
-                        </td>
-                        <td className={`text-lg font-bold ${p.trend === '↑' ? 'text-emerald-600' : p.trend === '↓' ? 'text-rose-600' : 'text-slate-400'}`}>{p.trend}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+      {/* ── Supplier Ledger tab ── */}
+      {activeTab === 'Ledger' && (
+        <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap items-center">
+            <select className="input w-56" value={selectedSupplierId} onChange={e => setSelectedSupplierId(e.target.value)}>
+              <option value="">— Select supplier —</option>
+              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <input type="date" className="input w-36" value={ledgerDates.from} onChange={e => setLedgerDates(p => ({ ...p, from: e.target.value }))} />
+            <input type="date" className="input w-36" value={ledgerDates.to} onChange={e => setLedgerDates(p => ({ ...p, to: e.target.value }))} />
+          </div>
 
-          {tab === 'ABC Segments' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { cls: 'A', label: 'Class A — Strategic', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-300', count: 2, spend: 'AED 168,400', pct: '62%', desc: 'Top 20% by spend — Negotiate best terms, build partnerships' },
-                  { cls: 'B', label: 'Class B — Preferred', color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-300',     count: 2, spend: 'AED 58,200',  pct: '21%', desc: 'Middle tier — Regular review, volume discounts possible' },
-                  { cls: 'C', label: 'Class C — Routine',   color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-300',   count: 2, spend: 'AED 45,000',  pct: '17%', desc: 'Occasional buys — Consolidate or find alternatives' },
-                ].map(seg => (
-                  <div key={seg.cls} className={`rounded-2xl border-2 ${seg.border} ${seg.bg} p-4`}>
-                    <div className={`text-4xl font-black ${seg.color} mb-2`}>{seg.cls}</div>
-                    <p className={`text-sm font-bold ${seg.color}`}>{seg.label}</p>
-                    <p className="text-xs text-slate-500 mt-1">{seg.desc}</p>
-                    <hr className="my-2 border-slate-200" />
-                    <div className="text-xs space-y-0.5">
-                      <div className="flex justify-between"><span className="text-slate-500">Suppliers</span><span className="font-bold text-slate-700">{seg.count}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">Annual Spend</span><span className="font-bold text-slate-700">{seg.spend}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">% of Total</span><span className={`font-bold ${seg.color}`}>{seg.pct}</span></div>
-                    </div>
+          {!selectedSupplierId ? (
+            <div className="text-center py-16 text-slate-400">Select a supplier to view their ledger</div>
+          ) : ledgerLoading ? (
+            <div className="text-center py-12 text-slate-400">Loading…</div>
+          ) : (
+            <>
+              {ledgerSupplier && (
+                <div className="flex items-center justify-between bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <div>
+                    <p className="font-bold text-slate-800">{ledgerSupplier.name}</p>
+                    <p className="text-xs text-slate-500">{ledgerSupplier.payment_terms} · Lead {ledgerSupplier.lead_days}d</p>
                   </div>
-                ))}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Supplier</th><th>Class</th><th>Annual Spend</th><th>% of Total</th><th>Deliveries</th><th>Score</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {SUPPLIERS.map(s => (
-                      <tr key={s.id}>
-                        <td className="font-semibold text-slate-800">{s.name}</td>
-                        <td><span className={`status-badge font-black ${ s.abc === 'A' ? 'bg-emerald-50 text-emerald-700' : s.abc === 'B' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500' }`}>{s.abc}</span></td>
-                        <td className="font-mono text-xs font-bold text-slate-700">AED {(s.balance * 12 * 0.9).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
-                        <td className="text-xs font-bold text-slate-600">{s.abc === 'A' ? '31%' : s.abc === 'B' ? '18%' : '9%'}</td>
-                        <td className="text-xs text-slate-500">{(s.score / 5).toFixed(0)} / mo</td>
-                        <td><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${s.score}%`}} /></div></td>
-                        <td><button className="btn btn-ghost btn-sm text-xs text-sky-600">Review</button></td>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-500">Outstanding Balance</p>
+                    <p className={`text-xl font-black ${parseFloat(ledgerSupplier.balance) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>৳{parseFloat(ledgerSupplier.balance).toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+              {ledger.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">No transactions found</div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Date</th>
+                        <th className="px-4 py-3 text-left">Type</th>
+                        <th className="px-4 py-3 text-left">Reference</th>
+                        <th className="px-4 py-3 text-right">Amount</th>
+                        <th className="px-4 py-3 text-right">Balance</th>
+                        <th className="px-4 py-3 text-left">Notes</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {ledger.map(row => (
+                        <tr key={row.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-3 text-slate-500 text-xs">{new Date(row.transaction_date).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${LEDGER_STYLE[row.transaction_type] || 'bg-slate-50 text-slate-600'}`}>
+                              {row.transaction_type.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{row.reference_type ? `${row.reference_type}#${row.reference_id}` : '—'}</td>
+                          <td className={`px-4 py-3 text-right font-semibold ${row.transaction_type === 'payment' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {row.transaction_type === 'payment' ? '−' : '+'}৳{parseFloat(row.amount).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700">৳{parseFloat(row.running_balance).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 max-w-xs truncate">{row.notes || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
-          {tab === 'ABC Segments' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { cls: 'A', label: 'Class A — Strategic', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-300', count: 2, spend: 'AED 168,400', pct: '62%', desc: 'Top 20% by spend — Negotiate best terms, build partnerships' },
-                  { cls: 'B', label: 'Class B — Preferred', color: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-300',     count: 2, spend: 'AED 58,200',  pct: '21%', desc: 'Middle tier — Regular review, volume discounts possible' },
-                  { cls: 'C', label: 'Class C — Routine',   color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-300',   count: 2, spend: 'AED 45,000',  pct: '17%', desc: 'Occasional buys — Consolidate or find alternatives' },
-                ].map(seg => (
-                  <div key={seg.cls} className={`rounded-2xl border-2 ${seg.border} ${seg.bg} p-4`}>
-                    <div className={`text-4xl font-black ${seg.color} mb-2`}>{seg.cls}</div>
-                    <p className={`text-sm font-bold ${seg.color}`}>{seg.label}</p>
-                    <p className="text-xs text-slate-500 mt-1">{seg.desc}</p>
-                    <hr className="my-2 border-slate-200" />
-                    <div className="text-xs space-y-0.5">
-                      <div className="flex justify-between"><span className="text-slate-500">Suppliers</span><span className="font-bold text-slate-700">{seg.count}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">Annual Spend</span><span className="font-bold text-slate-700">{seg.spend}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">% of Total</span><span className={`font-bold ${seg.color}`}>{seg.pct}</span></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead><tr><th>Supplier</th><th>Class</th><th>Annual Spend</th><th>% of Total</th><th>Deliveries</th><th>Score</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {SUPPLIERS.map(s => (
-                      <tr key={s.id}>
-                        <td className="font-semibold text-slate-800">{s.name}</td>
-                        <td><span className={`status-badge font-black ${ s.abc === 'A' ? 'bg-emerald-50 text-emerald-700' : s.abc === 'B' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500' }`}>{s.abc}</span></td>
-                        <td className="font-mono text-xs font-bold text-slate-700">AED {(s.balance * 12 * 0.9).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
-                        <td className="text-xs font-bold text-slate-600">{s.abc === 'A' ? '31%' : s.abc === 'B' ? '18%' : '9%'}</td>
-                        <td className="text-xs text-slate-500">{(s.score / 5).toFixed(0)} / mo</td>
-                        <td><div className="h-2 w-20 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${s.score}%`}} /></div></td>
-                        <td><button className="btn btn-ghost btn-sm text-xs text-sky-600">Review</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}        </div>
-      </div>
+        </div>
+      )}
+
+      {/* Modals */}
+      {showAddModal && <SupplierModal api={api} onClose={() => setShowAddModal(false)} onSaved={() => { setShowAddModal(false); refresh(); }} />}
+      {editSupplier && <SupplierModal api={api} existing={editSupplier} onClose={() => setEditSupplier(null)} onSaved={() => { setEditSupplier(null); refresh(); }} />}
+      {paymentSupplier && <PaymentModal api={api} supplier={paymentSupplier} onClose={() => setPaymentSupplier(null)} onSaved={() => { setPaymentSupplier(null); refresh(); }} />}
     </div>
   );
 }

@@ -40,6 +40,9 @@ const complaintsRoutes = require('./routes/complaints');
 const messagingRoutes = require('./routes/messaging');
 const publicApiRoutes = require('./routes/publicapi');
 const inventoryTransfersRoutes = require('./routes/inventoryTransfers');
+const inventoryItemsRoutes = require('./routes/inventoryItems');
+const suppliersRoutes = require('./routes/suppliers');
+const purchaseOrdersRoutes = require('./routes/purchaseOrders');
 
 const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
@@ -417,6 +420,9 @@ app.use('/api/complaints', authenticateToken, complaintsRoutes);
 app.use('/api/messaging', authenticateToken, messagingRoutes);
 app.use('/api/api-ecosystem', authenticateToken, publicApiRoutes);
 app.use('/api/inventory-transfers', inventoryTransfersRoutes);
+app.use('/api/inventory', authenticateToken, inventoryItemsRoutes);
+app.use('/api/suppliers', authenticateToken, suppliersRoutes);
+app.use('/api/purchase-orders', authenticateToken, purchaseOrdersRoutes);
 
 // 404 handler
 app.use('*', notFound);
@@ -562,6 +568,152 @@ server.listen(PORT, async () => {
       FOREIGN KEY (food_item_id) REFERENCES food_items(id),
       FOREIGN KEY (requested_by) REFERENCES users(id),
       FOREIGN KEY (approved_by) REFERENCES users(id)
+    )`);
+
+  // ── Inventory & Procurement (Phase 1 & 2) ────────────────────────────────
+  await patch('ingredients table', `
+    CREATE TABLE IF NOT EXISTS ingredients (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id     INT NOT NULL,
+      sku           VARCHAR(50),
+      name          VARCHAR(150) NOT NULL,
+      category      VARCHAR(100),
+      unit          VARCHAR(30) NOT NULL,
+      cost_price    DECIMAL(10,2) DEFAULT 0,
+      current_stock DECIMAL(12,3) DEFAULT 0,
+      reorder_level DECIMAL(12,3) DEFAULT 0,
+      min_stock     DECIMAL(12,3) DEFAULT 0,
+      max_stock     DECIMAL(12,3) DEFAULT 0,
+      is_active     BOOLEAN DEFAULT TRUE,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+    )`);
+
+  await patch('ingredients.sku_branch_unique', `
+    ALTER TABLE ingredients ADD UNIQUE KEY uq_ing_sku_branch (sku, branch_id)`);
+
+  await patch('stock_ledger table', `
+    CREATE TABLE IF NOT EXISTS stock_ledger (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id      INT NOT NULL,
+      ingredient_id  INT NOT NULL,
+      movement_type  ENUM('purchase','manual_in','adjustment','waste','transfer_in','transfer_out','opening','sale_deduction') NOT NULL,
+      qty            DECIMAL(12,3) NOT NULL,
+      balance_after  DECIMAL(12,3) NOT NULL,
+      unit_cost      DECIMAL(10,2) DEFAULT 0,
+      reference_type VARCHAR(50),
+      reference_id   INT,
+      notes          VARCHAR(255),
+      created_by     INT,
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id)     REFERENCES branches(id),
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id),
+      FOREIGN KEY (created_by)    REFERENCES users(id)
+    )`);
+
+  await patch('suppliers table', `
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id      INT NOT NULL,
+      name           VARCHAR(150) NOT NULL,
+      contact_person VARCHAR(100),
+      phone          VARCHAR(30),
+      email          VARCHAR(100),
+      address        TEXT,
+      category       VARCHAR(100),
+      payment_terms  ENUM('COD','NET-7','NET-15','NET-30','NET-45','NET-60') DEFAULT 'NET-30',
+      lead_days      INT DEFAULT 3,
+      balance        DECIMAL(12,2) DEFAULT 0,
+      is_active      BOOLEAN DEFAULT TRUE,
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+    )`);
+
+  await patch('purchase_orders table', `
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id      INT NOT NULL,
+      po_number      VARCHAR(60) NOT NULL,
+      supplier_id    INT NOT NULL,
+      status         ENUM('draft','confirmed','partial','received','cancelled') DEFAULT 'draft',
+      order_date     DATE NOT NULL,
+      expected_date  DATE,
+      subtotal       DECIMAL(12,2) DEFAULT 0,
+      tax_amount     DECIMAL(12,2) DEFAULT 0,
+      total_amount   DECIMAL(12,2) DEFAULT 0,
+      notes          TEXT,
+      created_by     INT,
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_po_number_branch (po_number, branch_id),
+      FOREIGN KEY (branch_id)  REFERENCES branches(id),
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+      FOREIGN KEY (created_by)  REFERENCES users(id)
+    )`);
+
+  await patch('purchase_order_items table', `
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      po_id           INT NOT NULL,
+      ingredient_id   INT NOT NULL,
+      qty_ordered     DECIMAL(12,3) NOT NULL,
+      qty_received    DECIMAL(12,3) DEFAULT 0,
+      unit_price      DECIMAL(10,2) NOT NULL,
+      total_price     DECIMAL(12,2) NOT NULL,
+      FOREIGN KEY (po_id)          REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id)  REFERENCES ingredients(id)
+    )`);
+
+  await patch('goods_received_notes table', `
+    CREATE TABLE IF NOT EXISTS goods_received_notes (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id      INT NOT NULL,
+      grn_number     VARCHAR(60) NOT NULL,
+      po_id          INT,
+      supplier_id    INT NOT NULL,
+      received_date  DATE NOT NULL,
+      total_amount   DECIMAL(12,2) DEFAULT 0,
+      notes          TEXT,
+      created_by     INT,
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_grn_number_branch (grn_number, branch_id),
+      FOREIGN KEY (branch_id)   REFERENCES branches(id),
+      FOREIGN KEY (po_id)       REFERENCES purchase_orders(id),
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+      FOREIGN KEY (created_by)  REFERENCES users(id)
+    )`);
+
+  await patch('grn_items table', `
+    CREATE TABLE IF NOT EXISTS grn_items (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      grn_id         INT NOT NULL,
+      ingredient_id  INT NOT NULL,
+      qty_received   DECIMAL(12,3) NOT NULL,
+      unit_cost      DECIMAL(10,2) NOT NULL,
+      total_cost     DECIMAL(12,2) NOT NULL,
+      expiry_date    DATE,
+      FOREIGN KEY (grn_id)        REFERENCES goods_received_notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id)
+    )`);
+
+  await patch('supplier_ledger table', `
+    CREATE TABLE IF NOT EXISTS supplier_ledger (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id        INT NOT NULL,
+      supplier_id      INT NOT NULL,
+      transaction_type ENUM('invoice','payment','debit_note','credit_note') NOT NULL,
+      reference_type   VARCHAR(50),
+      reference_id     INT,
+      amount           DECIMAL(12,2) NOT NULL,
+      running_balance  DECIMAL(12,2) NOT NULL,
+      notes            VARCHAR(255),
+      transaction_date DATE NOT NULL,
+      created_by       INT,
+      created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id)   REFERENCES branches(id),
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+      FOREIGN KEY (created_by)  REFERENCES users(id)
     )`);
 
   // Each branch owns its own menu — no cross-branch cloning.
