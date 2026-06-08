@@ -7,6 +7,34 @@ const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
+// Phase 3: Auto-deduct ingredient stock based on BOM recipes when an order is billed.
+// Non-blocking — if this fails the bill still succeeds; error is logged.
+async function deductRecipeStock(orderId, branchId, userId) {
+  const items = await query(
+    "SELECT oi.food_item_id, oi.quantity FROM order_items oi WHERE oi.order_id = ? AND oi.status != 'cancelled'",
+    [orderId]
+  );
+  for (const item of items) {
+    const lines = await query(
+      'SELECT r.ingredient_id, r.qty_per_portion FROM recipes r WHERE r.branch_id = ? AND r.food_item_id = ?',
+      [branchId, item.food_item_id]
+    );
+    for (const line of lines) {
+      const deductQty = parseFloat(line.qty_per_portion) * parseInt(item.quantity);
+      await query(
+        'UPDATE ingredients SET current_stock = GREATEST(0, current_stock - ?), updated_at = NOW() WHERE id = ? AND branch_id = ?',
+        [deductQty, line.ingredient_id, branchId]
+      );
+      const [ing] = await query('SELECT current_stock, cost_price FROM ingredients WHERE id = ?', [line.ingredient_id]);
+      await query(
+        `INSERT INTO stock_ledger (branch_id, ingredient_id, movement_type, qty, balance_after, unit_cost, reference_type, reference_id, notes, created_by)
+         VALUES (?, ?, 'sale_deduction', ?, ?, ?, 'order', ?, 'Auto-deducted from sale', ?)`,
+        [branchId, line.ingredient_id, -deductQty, ing?.current_stock ?? 0, ing?.cost_price || 0, orderId, userId || null]
+      );
+    }
+  }
+}
+
 // Generate unique order number — 4-digit random reduces birthday-paradox collision risk
 const generateOrderNumber = () => {
   const date = new Date();
@@ -1028,13 +1056,18 @@ router.post('/:id/payments', validateId, async (req, res) => {
     const newTotalPaid = totalPaid + amount;
     if (newTotalPaid >= order.total_amount) {
       await update('orders', { status: 'done' }, { id });
-      
+
+      // Phase 3: Deduct recipe stock on full payment (non-blocking)
+      deductRecipeStock(parseInt(id), order.branch_id, req.user?.id).catch(err =>
+        console.error(`Recipe deduction failed for order ${id}:`, err.message)
+      );
+
       // Emit real-time update
       const io = req.app.get('io');
-      io.emit('order-status-update', { 
-        orderId: parseInt(id), 
+      io.emit('order-status-update', {
+        orderId: parseInt(id),
         newStatus: 'done',
-        updatedBy: req.user.username 
+        updatedBy: req.user.username
       });
     }
     
@@ -1291,6 +1324,11 @@ router.post('/:id/bill', validateId, async (req, res) => {
       { bill_printed: false },
       { bill_printed: true, bill_printed_at: new Date() },
       req.ip, req.headers['user-agent']
+    );
+
+    // Phase 3: Deduct recipe stock (non-blocking — bill succeeds even if deduction fails)
+    deductRecipeStock(parseInt(id), order.branch_id, req.user?.id).catch(err =>
+      console.error(`Recipe deduction failed for order ${id}:`, err.message)
     );
 
     const io = req.app.get('io');

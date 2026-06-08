@@ -5,9 +5,9 @@ import { PlusIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, PencilIcon, TrashIcon
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
-const TABS = ['Ingredients', 'Stock Ledger', 'Alerts'];
-const TAB_PATH = { 'Ingredients': 'ingredients', 'Stock Ledger': 'ledger', 'Alerts': 'alerts' };
-const PATH_TAB = { '': 'Ingredients', 'ingredients': 'Ingredients', 'ledger': 'Stock Ledger', 'alerts': 'Alerts' };
+const TABS = ['Ingredients', 'Stock Ledger', 'Alerts', 'Analytics'];
+const TAB_PATH = { 'Ingredients': 'ingredients', 'Stock Ledger': 'ledger', 'Alerts': 'alerts', 'Analytics': 'analytics' };
+const PATH_TAB = { '': 'Ingredients', 'ingredients': 'Ingredients', 'ledger': 'Stock Ledger', 'alerts': 'Alerts', 'analytics': 'Analytics' };
 
 const STATUS_STYLE = {
   ok:       'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -223,6 +223,30 @@ export default function Inventory() {
     'stock-alerts',
     () => api.get('/inventory/alerts').then(r => r.data),
     { enabled: activeTab === 'Alerts', refetchInterval: 60000 }
+  );
+
+  const [analyticsDates, setAnalyticsDates] = useState({ from: '', to: '' });
+  const [analyticsTab, setAnalyticsTab] = useState('valuation'); // valuation | consumption | cogs | reorder
+
+  const { data: valuationData } = useQuery(
+    'inv-valuation',
+    () => api.get('/inventory/reports/valuation').then(r => r.data),
+    { enabled: activeTab === 'Analytics' && analyticsTab === 'valuation' }
+  );
+  const { data: consumptionData } = useQuery(
+    ['inv-consumption', analyticsDates],
+    () => api.get('/inventory/reports/consumption', { params: { from: analyticsDates.from || undefined, to: analyticsDates.to || undefined } }).then(r => r.data),
+    { enabled: activeTab === 'Analytics' && analyticsTab === 'consumption' }
+  );
+  const { data: cogsData } = useQuery(
+    ['inv-cogs', analyticsDates],
+    () => api.get('/inventory/reports/cogs', { params: { from: analyticsDates.from || undefined, to: analyticsDates.to || undefined } }).then(r => r.data),
+    { enabled: activeTab === 'Analytics' && analyticsTab === 'cogs' }
+  );
+  const { data: reorderData } = useQuery(
+    'inv-reorder',
+    () => api.get('/inventory/reports/reorder').then(r => r.data),
+    { enabled: activeTab === 'Analytics' && analyticsTab === 'reorder' }
   );
 
   const deleteMutation = useMutation(
@@ -462,6 +486,209 @@ export default function Inventory() {
                 </table>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* ── Analytics tab ── */}
+      {activeTab === 'Analytics' && (
+        <div className="space-y-4">
+          {/* Sub-tabs */}
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit flex-wrap">
+            {[['valuation','Stock Valuation'],['consumption','Consumption'],['cogs','COGS'],['reorder','Reorder']].map(([val, label]) => (
+              <button key={val} onClick={() => setAnalyticsTab(val)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all
+                  ${analyticsTab === val ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Date filters for consumption + cogs */}
+          {(analyticsTab === 'consumption' || analyticsTab === 'cogs') && (
+            <div className="flex gap-2 items-center">
+              <input type="date" className="input w-36" value={analyticsDates.from} onChange={e => setAnalyticsDates(p => ({ ...p, from: e.target.value }))} />
+              <input type="date" className="input w-36" value={analyticsDates.to} onChange={e => setAnalyticsDates(p => ({ ...p, to: e.target.value }))} />
+            </div>
+          )}
+
+          {/* ── Valuation ── */}
+          {analyticsTab === 'valuation' && (
+            <div className="space-y-3">
+              {!valuationData ? <div className="text-center py-8 text-slate-400">Loading…</div> : (
+                <>
+                  <div className="flex items-center justify-between bg-slate-50 rounded-xl p-4 border border-slate-100">
+                    <p className="text-slate-500 text-sm">Total Stock Value</p>
+                    <p className="text-2xl font-black text-slate-800">৳{valuationData.grand_total?.toFixed(2)}</p>
+                  </div>
+                  {valuationData.categories?.map(cat => (
+                    <div key={cat.category} className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                        <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">{cat.category}</p>
+                        <p className="text-sm font-bold text-slate-700">৳{cat.total_value?.toFixed(2)}</p>
+                      </div>
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-slate-50">
+                          {cat.items.map(i => (
+                            <tr key={i.id} className="hover:bg-slate-50/50">
+                              <td className="px-4 py-2.5 text-slate-700">{i.name}</td>
+                              <td className="px-4 py-2.5 text-slate-400 text-xs">{i.sku}</td>
+                              <td className="px-4 py-2.5 text-right text-slate-600">{i.current_stock} {i.unit}</td>
+                              <td className="px-4 py-2.5 text-right text-slate-500">৳{parseFloat(i.cost_price).toFixed(2)}</td>
+                              <td className="px-4 py-2.5 text-right font-semibold text-slate-800">৳{parseFloat(i.stock_value).toFixed(2)}</td>
+                              <td className="px-4 py-2.5">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_STYLE[i.stock_status] || 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{i.stock_status}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Consumption ── */}
+          {analyticsTab === 'consumption' && (
+            <div className="space-y-3">
+              {!consumptionData ? <div className="text-center py-8 text-slate-400">Loading…</div> : consumptionData.rows?.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">No consumption data for this period</div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between bg-slate-50 rounded-xl p-4 border border-slate-100">
+                    <p className="text-slate-500 text-sm">Total Consumption Cost</p>
+                    <p className="text-2xl font-black text-slate-800">৳{consumptionData.total_cost?.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Ingredient</th>
+                          <th className="px-4 py-3 text-left">Category</th>
+                          <th className="px-4 py-3 text-left">Type</th>
+                          <th className="px-4 py-3 text-right">Qty Used</th>
+                          <th className="px-4 py-3 text-right">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {consumptionData.rows?.map((r, i) => (
+                          <tr key={i} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
+                            <td className="px-4 py-3 text-slate-500">{r.category || '—'}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${MOVE_STYLE[r.movement_type] || 'bg-slate-50 text-slate-600'}`}>
+                                {MOVE_LABEL[r.movement_type] || r.movement_type}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">{parseFloat(r.total_qty).toFixed(3)} {r.unit}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-700">৳{parseFloat(r.total_cost).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── COGS ── */}
+          {analyticsTab === 'cogs' && (
+            <div className="space-y-3">
+              {!cogsData ? <div className="text-center py-8 text-slate-400">Loading…</div> : (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Total Revenue', value: `৳${cogsData.total_revenue?.toFixed(2)}`, color: 'bg-emerald-50 text-emerald-700' },
+                      { label: 'Total COGS',    value: `৳${cogsData.total_cogs?.toFixed(2)}`,    color: 'bg-rose-50 text-rose-700' },
+                      { label: 'Avg Food Cost', value: cogsData.avg_food_cost_pct ? `${cogsData.avg_food_cost_pct}%` : '—', color: 'bg-sky-50 text-sky-700' },
+                    ].map(s => (
+                      <div key={s.label} className={`rounded-xl p-4 ${s.color}`}>
+                        <p className="text-xl font-black">{s.value}</p>
+                        <p className="text-xs font-medium opacity-80 mt-0.5">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Item</th>
+                          <th className="px-4 py-3 text-right">Qty Sold</th>
+                          <th className="px-4 py-3 text-right">Revenue</th>
+                          <th className="px-4 py-3 text-right">COGS</th>
+                          <th className="px-4 py-3 text-right">Food Cost %</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {cogsData.items?.map(item => {
+                          const pct = item.food_cost_pct;
+                          const pctColor = pct
+                            ? parseFloat(pct) > 40 ? 'text-rose-600 font-bold'
+                            : parseFloat(pct) > 25 ? 'text-amber-600 font-semibold'
+                            : 'text-emerald-600 font-semibold'
+                            : 'text-slate-400';
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/50">
+                              <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+                              <td className="px-4 py-3 text-right text-slate-600">{item.qty_sold}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">৳{parseFloat(item.total_revenue).toFixed(2)}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">৳{parseFloat(item.total_cogs).toFixed(2)}</td>
+                              <td className={`px-4 py-3 text-right ${pctColor}`}>{pct ? `${pct}%` : '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Reorder Suggestions ── */}
+          {analyticsTab === 'reorder' && (
+            <div className="space-y-3">
+              {!reorderData ? <div className="text-center py-8 text-slate-400">Loading…</div> : reorderData.items?.length === 0 ? (
+                <div className="text-center py-12 text-emerald-600 font-semibold">All stock levels are healthy</div>
+              ) : (
+                <>
+                  <div className="bg-amber-50 rounded-xl p-3 border border-amber-200 text-sm text-amber-700 font-medium">
+                    {reorderData.total} ingredient{reorderData.total !== 1 ? 's' : ''} need restocking
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Ingredient</th>
+                          <th className="px-4 py-3 text-right">Current</th>
+                          <th className="px-4 py-3 text-right">Reorder At</th>
+                          <th className="px-4 py-3 text-right">Suggest Order</th>
+                          <th className="px-4 py-3 text-right">Est. Cost</th>
+                          <th className="px-4 py-3 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {reorderData.items?.map(i => (
+                          <tr key={i.id} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-3 font-medium text-slate-800">{i.name}</td>
+                            <td className="px-4 py-3 text-right font-bold text-slate-700">{i.current_stock} {i.unit}</td>
+                            <td className="px-4 py-3 text-right text-slate-500">{i.reorder_level} {i.unit}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-sky-700">{i.suggested_order_qty} {i.unit}</td>
+                            <td className="px-4 py-3 text-right text-slate-700">৳{parseFloat(i.estimated_cost).toFixed(2)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_STYLE[i.stock_status]}`}>{i.stock_status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

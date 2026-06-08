@@ -77,6 +77,7 @@ const NAV_SECTIONS = [
     label: 'ERP Modules',
     items: [
       { name: 'Inventory',          href: '/inventory',             icon: CubeIcon,                    roles: ['admin', 'manager'] },
+      { name: 'Recipes & BOM',      href: '/recipes',               icon: ClipboardDocumentListIcon,   roles: ['admin', 'manager'] },
       { name: 'Purchase',           href: '/purchase',              icon: ArchiveBoxIcon,              roles: ['admin', 'manager'] },
       { name: 'Suppliers',          href: '/suppliers',             icon: BuildingStorefrontIcon,      roles: ['admin', 'manager'] },
       { name: 'CRM & Loyalty',      href: '/crm',                   icon: UserGroupIcon,               roles: ['admin'] },

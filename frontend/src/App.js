@@ -33,6 +33,7 @@ const QaLinkedPage = lazy(() => import('./pages/QaLinkedPage'));
 const Inventory            = lazy(() => import('./pages/Inventory'));
 const Purchase             = lazy(() => import('./pages/Purchase'));
 const Suppliers            = lazy(() => import('./pages/Suppliers'));
+const Recipes              = lazy(() => import('./pages/Recipes'));
 const CRM                  = lazy(() => import('./pages/CRM'));
 const Expenses             = lazy(() => import('./pages/Expenses'));
 const Accounting           = lazy(() => import('./pages/Accounting'));
@@ -470,7 +471,7 @@ const AppContent = () => {
                   <Route
                     path="/inventory/*"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Inventory />
                         </Layout>
@@ -480,7 +481,7 @@ const AppContent = () => {
                   <Route
                     path="/purchase/*"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Purchase />
                         </Layout>
@@ -490,9 +491,19 @@ const AppContent = () => {
                   <Route
                     path="/suppliers/*"
                     element={
-                      <ProtectedRoute requiredRole="admin">
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
                         <Layout>
                           <Suppliers />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/recipes/*"
+                    element={
+                      <ProtectedRoute requiredRole={['admin', 'manager']}>
+                        <Layout>
+                          <Recipes />
                         </Layout>
                       </ProtectedRoute>
                     }

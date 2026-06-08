@@ -43,6 +43,7 @@ const inventoryTransfersRoutes = require('./routes/inventoryTransfers');
 const inventoryItemsRoutes = require('./routes/inventoryItems');
 const suppliersRoutes = require('./routes/suppliers');
 const purchaseOrdersRoutes = require('./routes/purchaseOrders');
+const recipesRoutes = require('./routes/recipes');
 
 const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth');
 const { logAudit } = require('./middleware/audit');
@@ -423,6 +424,7 @@ app.use('/api/inventory-transfers', inventoryTransfersRoutes);
 app.use('/api/inventory', authenticateToken, inventoryItemsRoutes);
 app.use('/api/suppliers', authenticateToken, suppliersRoutes);
 app.use('/api/purchase-orders', authenticateToken, purchaseOrdersRoutes);
+app.use('/api/recipes', authenticateToken, recipesRoutes);
 
 // 404 handler
 app.use('*', notFound);
@@ -714,6 +716,21 @@ server.listen(PORT, async () => {
       FOREIGN KEY (branch_id)   REFERENCES branches(id),
       FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
       FOREIGN KEY (created_by)  REFERENCES users(id)
+    )`);
+
+  await patch('recipes table', `
+    CREATE TABLE IF NOT EXISTS recipes (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      branch_id        INT NOT NULL,
+      food_item_id     INT NOT NULL,
+      ingredient_id    INT NOT NULL,
+      qty_per_portion  DECIMAL(10,4) NOT NULL,
+      created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_recipe_line (branch_id, food_item_id, ingredient_id),
+      FOREIGN KEY (branch_id)     REFERENCES branches(id) ON DELETE CASCADE,
+      FOREIGN KEY (food_item_id)  REFERENCES food_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
     )`);
 
   // Each branch owns its own menu — no cross-branch cloning.
