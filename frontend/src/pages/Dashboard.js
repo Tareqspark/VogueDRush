@@ -576,8 +576,8 @@ const Dashboard = () => {
 
       {tab === 'orders' && <OrdersTab />}
       {tab === 'kitchen' && <KitchenTab />}
-      {tab === 'receipts' && user?.role === 'admin' && <ReceiptsTab />}
-      {tab === 'transactions' && user?.role === 'admin' && <TransactionsTab />}
+      {tab === 'receipts' && (user?.role === 'admin' || user?.role === 'manager') && <ReceiptsTab />}
+      {tab === 'transactions' && (user?.role === 'admin' || user?.role === 'manager') && <TransactionsTab />}
       {/* ── Order Detail Modal ── */}
       {viewingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setViewingOrder(null)}>

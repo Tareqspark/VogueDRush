@@ -93,7 +93,7 @@ export default function Tables() {
           <h1 className="text-xl font-black text-slate-800">Tables</h1>
           <p className="text-slate-400 text-sm">{tables.length} tables total</p>
         </div>
-        {user.role === 'admin' && (
+        {(user.role === 'admin' || user.role === 'manager') && (
           <button onClick={() => setShowAddModal(true)} className="btn btn-primary">
             <PlusIcon className="h-4 w-4" /> Add Table
           </button>
@@ -222,7 +222,7 @@ function TableDetailModal({ table, onClose, onUpdateStatus, onEdit, onDelete, us
               </div>
             </div>
             <div className="flex items-center gap-1">
-              {userRole === 'admin' && !editMode && (
+              {(userRole === 'admin' || userRole === 'manager') && !editMode && (
                 <button onClick={() => setEditMode(true)} title="Edit table"
                   className="btn btn-ghost btn-icon text-violet-500 hover:bg-violet-50">
                   <PencilSquareIcon className="h-4.5 w-4.5" style={{ height: '1.1rem', width: '1.1rem' }} />
@@ -297,7 +297,7 @@ function TableDetailModal({ table, onClose, onUpdateStatus, onEdit, onDelete, us
           )}
 
           {/* Status buttons */}
-          {userRole === 'admin' && !editMode && (
+          {(userRole === 'admin' || userRole === 'manager') && !editMode && (
             <div className="flex gap-2 pt-1">
               {table.status !== 'available' && (
                 <button onClick={() => onUpdateStatus(table.id, 'available')} className="flex-1 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors">Set Available</button>
@@ -312,7 +312,7 @@ function TableDetailModal({ table, onClose, onUpdateStatus, onEdit, onDelete, us
           )}
 
           {/* Delete — admin only, not when occupied */}
-          {userRole === 'admin' && !editMode && (
+          {(userRole === 'admin' || userRole === 'manager') && !editMode && (
             confirmDelete ? (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-2">
                 <p className="text-sm font-bold text-rose-700">Delete Table {table.table_number}?</p>

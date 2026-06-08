@@ -104,7 +104,7 @@ export default function Orders() {
           <button onClick={() => setShowSearch(true)} className="btn btn-secondary">
             <MagnifyingGlassIcon className="h-4 w-4" /> Search
           </button>
-          {user?.role === 'admin' && (
+          {(user?.role === 'admin' || user?.role === 'manager') && (
             <button onClick={() => setShowBackdate(true)} className="btn btn-secondary">
               <ClockIcon className="h-4 w-4" /> Backdate Entry
             </button>
@@ -499,7 +499,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
               </button>
             )}
 
-            {userRole === 'admin' && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
+            {(userRole === 'admin' || userRole === 'manager') && !['done','cancelled'].includes(order.status) && !order.bill_printed && (
               <button onClick={requestCancel} className="btn btn-error px-4">
                 Cancel
               </button>
