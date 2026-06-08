@@ -384,6 +384,34 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ── ONE-TIME DATA RESET — admin only, remove after use ───────────────────────
+app.post('/api/admin/reset-data', authenticateToken, async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  try {
+    const { query } = require('./config/database');
+    const truncate = async (table) => {
+      const [r] = await query(
+        `SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`,
+        [table]
+      );
+      if (r.c > 0) { await query(`DELETE FROM \`${table}\``); await query(`ALTER TABLE \`${table}\` AUTO_INCREMENT = 1`); }
+    };
+    await query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const t of [
+      'order_modifications','kitchen_queue','delivery_tracking','delivery_details',
+      'payments','order_items','orders','reservations','tables',
+      'food_inventory','recipes','food_items','food_categories',
+      'waste_logs','expenses','grn_items','goods_received_notes',
+      'purchase_order_items','purchase_orders','supplier_ledger','stock_ledger',
+      'ingredients','suppliers','audit_logs','token_blacklist','user_sessions',
+    ]) await truncate(t);
+    await query(`DELETE FROM users WHERE role != 'admin'`);
+    await query('SET FOREIGN_KEY_CHECKS = 1');
+    res.json({ success: true, message: 'All data cleared. Admin user kept.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // API Routes with specific rate limiting
 app.use('/api/auth', rateLimiters.auth, authRoutes);
 app.use('/api/branches', branchRoutes); // GET is public (used in login flow); mutations use requireRole internally
