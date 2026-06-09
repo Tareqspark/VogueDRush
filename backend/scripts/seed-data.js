@@ -86,7 +86,7 @@ const CUSTOMER_NAMES  = ['Rafiq Ahmed', 'Nusrat Jahan', 'Karim Hossain', 'Shirin
                          'Mahbub Rahman', 'Tasnim Islam', 'Jahangir Alam', 'Ritu Das',
                          'Farhan Chowdhury', 'Maliha Begum', 'Sohel Rana', 'Priya Sen'];
 const PAYMENT_METHODS = ['cash', 'card', 'mobile_banking'];
-const ORDER_TYPES     = ['dine_in', 'takeaway', 'direct'];
+const ORDER_TYPES     = ['dine_in', 'delivery', 'direct'];
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function main() {
@@ -185,9 +185,9 @@ async function main() {
 
       let ordersCreated = 0;
       for (const finalStatus of shuffle(ORDER_PLAN)) {
-        const orderType = finalStatus === 'done' ? pick(['dine_in', 'takeaway', 'direct']) : 'dine_in';
+        const orderType = finalStatus === 'done' ? pick(['dine_in', 'delivery', 'direct']) : 'dine_in';
         const tableId   = orderType === 'dine_in' ? pick(tableIds) : null;
-        const customerName = ['takeaway', 'direct'].includes(orderType) ? pick(CUSTOMER_NAMES) : null;
+        const customerName = ['delivery', 'direct'].includes(orderType) ? pick(CUSTOMER_NAMES) : null;
 
         // pick 2-4 random items
         const pickedItems = shuffle(foodItemIds).slice(0, rand(2, 4));
