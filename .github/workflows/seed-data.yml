@@ -1,0 +1,33 @@
+name: Seed Demo Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES to seed all branches with demo data'
+        required: true
+        default: ''
+
+jobs:
+  seed:
+    name: Seed menu, tables & orders
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Abort if not confirmed
+        if: ${{ github.event.inputs.confirm != 'YES' }}
+        run: |
+          echo "Confirmation input was '${{ github.event.inputs.confirm }}' — must be exactly YES"
+          exit 1
+
+      - name: Run seed script on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /var/www/foodpark/backend
+            node scripts/seed-data.js
