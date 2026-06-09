@@ -52,15 +52,16 @@ const rateLimiters = {
     }
   }),
 
-  // Authentication endpoints - stricter limits
+  // Authentication endpoints — keyed per username+IP so one user can't block others
   auth: createRateLimiter({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // 5 attempts per 15 minutes
+    windowMs: 15 * 60 * 1000,
+    max: 20,
     message: {
       error: 'Too many login attempts, please try again later',
       code: 'AUTH_RATE_LIMIT_EXCEEDED'
     },
-    skipSuccessfulRequests: true
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => `${(req.body?.username || 'unknown').toLowerCase()}:${req.ip}`,
   }),
 
   // Password change - very strict
