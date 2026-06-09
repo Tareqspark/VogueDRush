@@ -10,8 +10,8 @@ const rand  = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pick  = arr => arr[rand(0, arr.length - 1)];
 const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
 
-let orderSeq = 1000;
-const nextOrderNum = (branchId) => `ORD-B${branchId}-${String(++orderSeq).padStart(4, '0')}`;
+let orderSeq = Math.floor(Math.random() * 90000) + 10000; // random start — unique per run
+const nextOrderNum = (branchId) => `ORD-B${branchId}-${++orderSeq}`;
 
 // ── menu catalogue (shared across branches) ───────────────────────────────────
 const CATEGORIES = [
