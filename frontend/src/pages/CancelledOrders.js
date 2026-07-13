@@ -15,8 +15,9 @@ function printCancellationReceipt(order) {
   <meta charset="UTF-8" />
   <title>Cancellation Receipt — ${order.order_number}</title>
   <style>
+    @page { size: 58mm auto; margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Courier New', monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 16px; }
+    body { font-family: 'Courier New', monospace; font-size: 11px; width: 54mm; margin: 0 auto; padding: 2mm; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 8px 0; }

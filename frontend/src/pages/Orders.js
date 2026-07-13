@@ -601,11 +601,12 @@ function buildReceiptHTML(data) {
   const discRow = parseFloat(order.discount_amount) > 0 ? `<tr><td>Discount</td><td style="text-align:right;color:#dc2626">-${currency}${parseFloat(order.discount_amount).toFixed(2)}</td></tr>` : '';
   const grossTotal = (parseFloat(order.subtotal) + parseFloat(order.vat_amount || 0) + parseFloat(order.service_charge || 0)).toFixed(2);
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
-  <style>body{font-family:monospace;font-size:12px;padding:12px;max-width:300px;margin:auto}
-  h2{text-align:center;font-size:16px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
-  table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:11px;text-align:left}
-  td{padding:2px 0}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:14px}
-  .footer{text-align:center;margin-top:10px;font-size:10px;color:#777}@media print{body{margin:0}}</style></head><body>
+  <style>@page{size:58mm auto;margin:0}
+  body{font-family:monospace;font-size:11px;padding:2mm;width:54mm;margin:auto;box-sizing:border-box}
+  h2{text-align:center;font-size:13px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
+  table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:10px;text-align:left}
+  td{padding:2px 0;word-break:break-word}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:12px}
+  .footer{text-align:center;margin-top:10px;font-size:9px;color:#777}@media print{body{margin:0;width:54mm}}</style></head><body>
   <h2>${rname}</h2>${address ? `<p>${address}</p>` : ''}${phone ? `<p>Tel: ${phone}</p>` : ''}${vatNumber ? `<p>VAT Reg: ${vatNumber}</p>` : ''}
   <div class="divider"></div>
   <p>Order: <strong>${order.order_number}</strong></p>
