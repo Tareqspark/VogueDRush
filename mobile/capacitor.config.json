@@ -1,0 +1,9 @@
+{
+  "appId": "com.foodpark.pos",
+  "appName": "FoodPark POS",
+  "webDir": "www",
+  "server": {
+    "url": "https://voguedrush.com",
+    "cleartext": false
+  }
+}

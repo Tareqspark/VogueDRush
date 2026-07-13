@@ -22,3 +22,20 @@ Thumbs.db
 
 # Cache
 frontend/node_modules/.cache/
+
+# Android / Capacitor (mobile/)
+mobile/node_modules/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/capacitor-cordova-android-plugins/build/
+mobile/android/local.properties
+mobile/android/.idea/
+mobile/android/*.iml
+mobile/android/**/*.iml
+mobile/android/captures/
+mobile/android/app/release/
+mobile/android/app/debug/
+mobile/plugins/*/node_modules/
+mobile/plugins/*/dist/
+mobile/plugins/*/android/build/
