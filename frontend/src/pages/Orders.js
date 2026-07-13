@@ -15,6 +15,7 @@ import TransactionsTab from '../components/shared/TransactionsTab';
 import BackdateOrderModal from '../components/Orders/BackdateOrderModal';
 import OrdersTab from '../components/shared/OrdersTab';
 import KitchenTab from '../components/shared/KitchenTab';
+import { printReceipt } from '../utils/receipt';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -352,9 +353,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
     });
     setPrinting(false);
     if (data) {
-      const html = buildReceiptHTML(data);
-      const w = window.open('', '_blank', 'width=380,height=650');
-      if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+      await printReceipt({ type: 'bill', order: data.order, items: data.items, restaurant: data.restaurant });
       setShowBillPopup(false);
       toast.success('Bill printed! Order auto-completed.');
       onClose();
@@ -362,7 +361,8 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
   };
 
   const handleReprint = () => {
-    const data = {
+    printReceipt({
+      type: 'bill',
       order,
       items: activeItems,
       restaurant: {
@@ -372,10 +372,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
         vat_number: restaurantCfg?.vat_number || '',
         currency:   restaurantCfg?.currency   || '৳',
       },
-    };
-    const html = buildReceiptHTML(data);
-    const w = window.open('', '_blank', 'width=380,height=650');
-    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+    });
   };
 
   const handleMarkDone = async () => {
@@ -580,53 +577,6 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
       )}
     </div>
   );
-}
-
-// ────────────────────────────────────────────────────────────────
-// Build receipt HTML for window.print()
-// ────────────────────────────────────────────────────────────────
-function buildReceiptHTML(data) {
-  const { order, items, restaurant = {}, isDue = false } = data;
-  const currency = restaurant.currency || '৳';
-  const rname = restaurant.name || 'FoodPark';
-  const address = restaurant.address || '';
-  const phone = restaurant.phone || '';
-  const vatNumber = restaurant.vat_number || '';
-  const activeItems = (items || []).filter(i => i.status !== 'cancelled');
-  const rows = activeItems.map(i =>
-    `<tr><td>${i.item_name || i.name || ''}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">${currency}${parseFloat(i.total_price).toFixed(2)}</td></tr>`
-  ).join('');
-  const vatRow = parseFloat(order.vat_amount) > 0 ? `<tr><td>VAT</td><td style="text-align:right">${currency}${parseFloat(order.vat_amount).toFixed(2)}</td></tr>` : '';
-  const svcRow = parseFloat(order.service_charge) > 0 ? `<tr><td>Service Charge</td><td style="text-align:right">${currency}${parseFloat(order.service_charge).toFixed(2)}</td></tr>` : '';
-  const discRow = parseFloat(order.discount_amount) > 0 ? `<tr><td>Discount</td><td style="text-align:right;color:#dc2626">-${currency}${parseFloat(order.discount_amount).toFixed(2)}</td></tr>` : '';
-  const grossTotal = (parseFloat(order.subtotal) + parseFloat(order.vat_amount || 0) + parseFloat(order.service_charge || 0)).toFixed(2);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
-  <style>@page{size:58mm auto;margin:0}
-  body{font-family:monospace;font-size:11px;padding:2mm;width:54mm;margin:auto;box-sizing:border-box}
-  h2{text-align:center;font-size:13px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
-  table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:10px;text-align:left}
-  td{padding:2px 0;word-break:break-word}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:12px}
-  .footer{text-align:center;margin-top:10px;font-size:9px;color:#777}@media print{body{margin:0;width:54mm}}</style></head><body>
-  <h2>${rname}</h2>${address ? `<p>${address}</p>` : ''}${phone ? `<p>Tel: ${phone}</p>` : ''}${vatNumber ? `<p>VAT Reg: ${vatNumber}</p>` : ''}
-  <div class="divider"></div>
-  <p>Order: <strong>${order.order_number}</strong></p>
-  <p>${new Date(order.created_at).toLocaleString()}</p>
-  ${order.table_number ? `<p>Table: ${order.table_number}</p>` : ''}
-  ${order.customer_name ? `<p>Customer: ${order.customer_name}</p>` : ''}
-  ${order.waiter_full_name || order.waiter_name ? `<p>Served by: ${order.waiter_full_name || order.waiter_name}</p>` : ''}
-  <div class="divider"></div>
-  <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
-  <tbody>${rows}</tbody></table>
-  <div class="divider"></div>
-  <table><tr><td>Food Price</td><td style="text-align:right">${currency}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
-  ${vatRow}${svcRow}
-  <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${currency}${grossTotal}</strong></td></tr>
-  ${discRow}
-  <tr class="total"><td>Total Payable</td><td style="text-align:right">${currency}${parseFloat(order.total_amount).toFixed(2)}</td></tr></table>
-  <div class="divider"></div>
-  <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>
-  ${isDue ? '<div style="margin-top:12px;padding:8px;border:2px dashed #dc2626;text-align:center;"><strong style="font-size:14px;color:#dc2626;">⚠ DUE — PAYMENT PENDING</strong><br/><span style="font-size:11px;color:#555;">Customer: ' + (order.customer_name || '') + '</span><br/><span style="font-size:11px;color:#555;">Phone: ' + (order.customer_phone || '') + '</span></div>' : ''}
-  </body></html>`;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -914,15 +864,8 @@ function HoldOrderModal({ api, order, onClose, onHeld }) {
       });
       toast.success('Order held. Table released.');
       if (printDue) {
-        // Print DUE slip
         const heldOrder = res.data.order || { ...order, customer_name: customerName, customer_phone: customerPhone };
-        const html = buildReceiptHTML({
-          order: heldOrder,
-          items: [],  // no item lines on DUE slip — caller should pass items if needed
-          isDue: true,
-        });
-        const w = window.open('', '_blank', 'width=380,height=500');
-        if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+        printReceipt({ type: 'due', order: heldOrder, items: [] });
       }
       onHeld();
     } catch (e) {

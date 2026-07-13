@@ -8,6 +8,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import { printReceipt } from '../utils/receipt';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -303,9 +304,7 @@ function ReservationOrderModal({ api, reservation, onClose, onCompleted }) {
     setPrinting(true);
     try {
       const res = await api.post(`/orders/${orderId}/bill`);
-      const html = buildReceiptHTML(res.data);
-      const w = window.open('', '_blank', 'width=380,height=650');
-      if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+      await printReceipt({ type: 'bill', order: res.data.order, items: res.data.items, restaurant: res.data.restaurant });
       await api.patch(`/reservations/${reservation.id}/status`, { status: 'completed' });
       toast.success('Bill printed! Reservation completed.');
       onCompleted();
@@ -502,41 +501,4 @@ function ReservationOrderModal({ api, reservation, onClose, onCompleted }) {
       </div>
     </div>
   );
-}
-
-function buildReceiptHTML(data) {
-  const { order, items, restaurant = {} } = data;
-  const cur = restaurant.currency || '৳';
-  const rname = restaurant.name || 'FoodPark';
-  const address = restaurant.address || '';
-  const phone = restaurant.phone || '';
-  const active = (items || []).filter(i => i.status !== 'cancelled');
-  const rows = active.map(i =>
-    `<tr><td>${i.item_name||i.name||''}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">${cur}${parseFloat(i.total_price).toFixed(2)}</td></tr>`
-  ).join('');
-  const vatRow = parseFloat(order.vat_amount)>0 ? `<tr><td>VAT</td><td style="text-align:right">${cur}${parseFloat(order.vat_amount).toFixed(2)}</td></tr>` : '';
-  const svcRow = parseFloat(order.service_charge)>0 ? `<tr><td>Service</td><td style="text-align:right">${cur}${parseFloat(order.service_charge).toFixed(2)}</td></tr>` : '';
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
-<style>body{font-family:monospace;font-size:12px;padding:12px;max-width:300px;margin:auto}
-h2{text-align:center;font-size:16px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
-table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dashed #000;padding:3px 0;font-size:11px;text-align:left}
-td{padding:2px 0}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:14px}
-.footer{text-align:center;margin-top:10px;font-size:10px;color:#777}@media print{body{margin:0}}</style></head><body>
-<h2>${rname}</h2>${address?`<p>${address}</p>`:''}${phone?`<p>Tel: ${phone}</p>`:''}
-<div class="divider"></div>
-<p>Order: <strong>${order.order_number}</strong></p>
-<p>${new Date(order.created_at).toLocaleString()}</p>
-${order.table_number?`<p>Table: ${order.table_number}</p>`:''}
-<div class="divider"></div>
-<table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${rows}</tbody></table>
-<div class="divider"></div>
-<table>
-<tr><td>Subtotal</td><td style="text-align:right">${cur}${parseFloat(order.subtotal).toFixed(2)}</td></tr>
-${vatRow}${svcRow}
-<tr class="total"><td>TOTAL</td><td style="text-align:right">${cur}${parseFloat(order.total_amount).toFixed(2)}</td></tr>
-</table>
-<div class="divider"></div>
-<p class="footer">Thank you for dining with us!</p>
-</body></html>`;
 }
