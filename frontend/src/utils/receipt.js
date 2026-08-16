@@ -8,6 +8,20 @@ table{width:100%;border-collapse:collapse;margin:8px 0}th{border-bottom:1px dash
 td{padding:2px 0;word-break:break-word}.divider{border-top:1px dashed #000;margin:6px 0}.total{font-weight:bold;font-size:12px}
 .footer{text-align:center;margin-top:10px;font-size:9px;color:#777}
 .banner{margin-top:10px;padding:6px;border:2px dashed;text-align:center;font-weight:bold}
+/* Fixed layout with explicit column widths. Without this the browser auto-sizes
+   from content, long item names starve the last column, and "Amount" wraps onto
+   a second line on a 54mm roll. nowrap keeps headers and money on one line. */
+table.items,table.totals{table-layout:fixed}
+.items td:nth-child(1),.items th:nth-child(1){width:50%}
+.items td:nth-child(2),.items th:nth-child(2){width:16%;text-align:center;white-space:nowrap}
+.items td:nth-child(3),.items th:nth-child(3){width:34%;text-align:right;white-space:nowrap}
+.totals td:nth-child(1){width:58%}
+.totals td:nth-child(2){width:42%;text-align:right;white-space:nowrap}
+/* Identifies which copy this is — BILL vs KITCHEN COPY. */
+.doclabel{text-align:center;font-weight:bold;font-size:14px;letter-spacing:3px;
+  border:2px solid #000;padding:3px 0;margin:6px 0}
+.kitchen-item{font-size:14px;font-weight:bold;padding:4px 0;border-bottom:1px dotted #999}
+.kitchen-qty{font-size:16px;font-weight:bold;text-align:right;white-space:nowrap}
 @media print{body{margin:0;width:54mm}}`;
 
 const fmt = (n) => parseFloat(n || 0).toFixed(2);
@@ -54,6 +68,31 @@ export function buildReceiptData({ type, order, items = [], restaurant = {} }) {
 
 const TYPE_LABELS = { dine_in: 'Dine In', delivery: 'Delivery', direct: 'Takeaway' };
 
+// Printed prominently so staff can tell copies apart at a glance.
+const DOC_LABELS = { bill: 'BILL', due: 'BILL — DUE', settled: 'BILL — PAID', kitchen: 'KITCHEN COPY' };
+
+// Kitchen copy: what to cook and how many. Deliberately no prices, no totals —
+// larger type so it reads on a pass rail.
+function toKitchenHtml(d) {
+  const rowsHtml = d.rows.map(r =>
+    `<tr><td class="kitchen-item">${r.name}</td><td class="kitchen-item kitchen-qty">x${r.qty}</td></tr>`
+  ).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kitchen Copy — ${d.orderNumber}</title>
+  <style>${RECEIPT_CSS}</style></head><body>
+  <div class="doclabel">KITCHEN COPY</div>
+  <p style="text-align:center;font-size:13px;font-weight:bold;margin:4px 0">Order ${d.orderNumber}</p>
+  <div class="divider"></div>
+  <p style="text-align:left;margin:2px 0">Type: <strong>${TYPE_LABELS[d.orderType] || d.orderType || '—'}</strong></p>
+  ${d.tableNumber ? `<p style="text-align:left;margin:2px 0">Table: <strong>${d.tableNumber}</strong></p>` : ''}
+  ${d.servedBy ? `<p style="text-align:left;margin:2px 0">Waiter: ${d.servedBy}</p>` : ''}
+  <p style="text-align:left;margin:2px 0">${d.createdAt}</p>
+  <div class="divider"></div>
+  <table class="totals"><tbody>${rowsHtml}</tbody></table>
+  <div class="divider"></div>
+  <p class="footer">Printed ${d.printedAt}</p>
+  </body></html>`;
+}
+
 function toHtml(d) {
   if (d.type === 'cancelled') {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cancellation Receipt — ${d.orderNumber}</title>
@@ -80,11 +119,11 @@ function toHtml(d) {
   }
 
   const rowsHtml = d.rows.map(r =>
-    `<tr><td>${r.name}</td><td style="text-align:center">${r.qty}</td><td style="text-align:right">${d.currency}${r.amount}</td></tr>`
+    `<tr><td>${r.name}</td><td>${r.qty}</td><td>${d.currency}${r.amount}</td></tr>`
   ).join('');
-  const vatRow = d.vatAmount ? `<tr><td>VAT</td><td style="text-align:right">${d.currency}${d.vatAmount}</td></tr>` : '';
-  const svcRow = d.serviceCharge ? `<tr><td>Service Charge</td><td style="text-align:right">${d.currency}${d.serviceCharge}</td></tr>` : '';
-  const discRow = d.discountAmount ? `<tr><td>Discount</td><td style="text-align:right;color:#dc2626">-${d.currency}${d.discountAmount}</td></tr>` : '';
+  const vatRow = d.vatAmount ? `<tr><td>VAT</td><td>${d.currency}${d.vatAmount}</td></tr>` : '';
+  const svcRow = d.serviceCharge ? `<tr><td>Service Charge</td><td>${d.currency}${d.serviceCharge}</td></tr>` : '';
+  const discRow = d.discountAmount ? `<tr><td>Discount</td><td style="color:#dc2626">-${d.currency}${d.discountAmount}</td></tr>` : '';
 
   let banner = '';
   if (d.type === 'due') {
@@ -102,15 +141,16 @@ function toHtml(d) {
   ${d.tableNumber ? `<p>Table: ${d.tableNumber}</p>` : ''}
   ${d.customerName ? `<p>Customer: ${d.customerName}</p>` : ''}
   ${d.servedBy ? `<p>Served by: ${d.servedBy}</p>` : ''}
+  <div class="doclabel">${DOC_LABELS[d.type] || 'BILL'}</div>
   <div class="divider"></div>
-  <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
+  <table class="items"><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead>
   <tbody>${rowsHtml}</tbody></table>
   <div class="divider"></div>
-  <table><tr><td>Food Price</td><td style="text-align:right">${d.currency}${d.subtotal}</td></tr>
+  <table class="totals"><tr><td>Food Price</td><td>${d.currency}${d.subtotal}</td></tr>
   ${vatRow}${svcRow}
-  <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${d.currency}${d.grossTotal}</strong></td></tr>
+  <tr><td><strong>Total</strong></td><td><strong>${d.currency}${d.grossTotal}</strong></td></tr>
   ${discRow}
-  <tr class="total"><td>Total Payable</td><td style="text-align:right">${d.currency}${d.totalPayable}</td></tr></table>
+  <tr class="total"><td>Total Payable</td><td>${d.currency}${d.totalPayable}</td></tr></table>
   <div class="divider"></div>
   ${banner}
   <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>
@@ -122,6 +162,30 @@ function toSpec(d) {
   const spec = [
     { type: 'text', text: d.restaurantName, align: 1, bold: true },
   ];
+
+  // Kitchen copy: item + qty only, no money.
+  if (d.type === 'kitchen') {
+    spec.push({ type: 'text', text: 'KITCHEN COPY', align: 1, bold: true });
+    spec.push({ type: 'text', text: `Order ${d.orderNumber}`, align: 1, bold: true });
+    spec.push({ type: 'divider' });
+    spec.push({ type: 'text', text: `Type: ${TYPE_LABELS[d.orderType] || d.orderType || '-'}`, align: 0 });
+    if (d.tableNumber) spec.push({ type: 'text', text: `Table: ${d.tableNumber}`, align: 0, bold: true });
+    if (d.servedBy) spec.push({ type: 'text', text: `Waiter: ${d.servedBy}`, align: 0 });
+    spec.push({ type: 'text', text: d.createdAt, align: 0 });
+    spec.push({ type: 'divider' });
+    d.rows.forEach(r => spec.push({
+      type: 'row',
+      cols: [r.name, `x${r.qty}`],
+      widths: [24, 8],
+      align: [0, 2],
+      bold: true,
+    }));
+    spec.push({ type: 'divider' });
+    spec.push({ type: 'text', text: `Printed: ${d.printedAt}`, align: 1 });
+    spec.push({ type: 'feed', lines: 4 });
+    return spec;
+  }
+
   if (d.type === 'cancelled') {
     spec.push({ type: 'text', text: 'CANCELLATION RECEIPT', align: 1, bold: true });
     spec.push({ type: 'text', text: `Order ${d.orderNumber}`, align: 1 });
@@ -148,6 +212,7 @@ function toSpec(d) {
   if (d.address) spec.push({ type: 'text', text: d.address, align: 1 });
   if (d.phone) spec.push({ type: 'text', text: `Tel: ${d.phone}`, align: 1 });
   if (d.vatNumber) spec.push({ type: 'text', text: `VAT Reg: ${d.vatNumber}`, align: 1 });
+  spec.push({ type: 'text', text: DOC_LABELS[d.type] || 'BILL', align: 1, bold: true });
   spec.push({ type: 'divider' });
   spec.push({ type: 'text', text: `Order: ${d.orderNumber}`, align: 0 });
   spec.push({ type: 'text', text: d.createdAt, align: 0 });
@@ -232,5 +297,5 @@ export async function printReceipt({ type, order, items = [], restaurant = {} })
     toast.error('No printer on this device. Use a Sunmi terminal to print.');
     return;
   }
-  openAndPrint(toHtml(data));
+  openAndPrint(data.type === 'kitchen' ? toKitchenHtml(data) : toHtml(data));
 }

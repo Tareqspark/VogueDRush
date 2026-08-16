@@ -917,12 +917,14 @@ function WaiterDashboard({ api, user, isConnected }) {
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-4 gap-3">
+      {/* 2-up until sm: at 360px (Sunmi V2s) four tracks can't hold "Reservations",
+          which is one unbreakable word and forces the grid past the viewport. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {quickActions.map(a => (
           <button key={a.path} onClick={() => navigate(a.path)}
-            className={`${a.color} text-white rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors active:scale-95`}>
+            className={`${a.color} text-white rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors active:scale-95 min-w-0`}>
             <span className="text-2xl">{a.icon}</span>
-            <span className="text-xs font-bold">{a.label}</span>
+            <span className="text-xs font-bold text-center break-words">{a.label}</span>
           </button>
         ))}
       </div>

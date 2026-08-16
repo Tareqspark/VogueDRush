@@ -23,6 +23,11 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  /* Long words (item names, branch names, labels) must wrap rather than set a
+     min-content floor that pushes grid/flex tracks past the viewport. Grid `1fr`
+     tracks never shrink below min-content, so one long word is enough to force
+     sideways scrolling on the 360px-wide Sunmi terminals. */
+  overflow-wrap: break-word;
 }
 
 #root { min-height: 100vh; }

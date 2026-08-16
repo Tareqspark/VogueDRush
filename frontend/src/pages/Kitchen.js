@@ -149,7 +149,9 @@ export default function Kitchen() {
       {tab === 'overview' && (
         <>
           {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Wraps because at 360px (Sunmi V2s) the title plus the w-44 search, w-36
+          select and Refresh button measure 457px and scroll the page sideways. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center shadow-sm">
             <FireIcon className="h-5 w-5 text-white" />
@@ -159,7 +161,7 @@ export default function Kitchen() {
             <p className="text-slate-400 text-xs">{orders.length} order{orders.length !== 1 ? 's' : ''} in queue</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Search box */}
           <div className="relative">
             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />

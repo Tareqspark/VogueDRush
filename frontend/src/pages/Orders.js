@@ -96,12 +96,14 @@ export default function Orders() {
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Wraps because at 360px (Sunmi V2s) the title plus the action buttons
+          measure 420px and would otherwise scroll the whole page sideways. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-slate-800">Orders</h1>
           <p className="text-slate-500 text-sm">{orders.length} orders found</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setShowSearch(true)} className="btn btn-secondary">
             <MagnifyingGlassIcon className="h-4 w-4" /> Search
           </button>
@@ -375,6 +377,20 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
     });
   };
 
+  // Kitchen copy — items and quantities only, no prices. Available regardless of
+  // bill state, since the kitchen needs it when the order is placed, not settled.
+  const handleKitchenCopy = () => {
+    printReceipt({
+      type: 'kitchen',
+      order,
+      items: activeItems,
+      restaurant: {
+        name:     restaurantCfg?.name     || 'FoodPark',
+        currency: restaurantCfg?.currency || '৳',
+      },
+    });
+  };
+
   const handleMarkDone = async () => {
     if (!order.bill_printed) {
       handleOpenBillPopup();
@@ -481,6 +497,10 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
                 <PrinterIcon className="h-4 w-4" /> Re-print
               </button>
             )}
+
+            <button onClick={handleKitchenCopy} className="btn btn-secondary flex items-center gap-1.5">
+              <PrinterIcon className="h-4 w-4" /> Kitchen Copy
+            </button>
 
             {!['done','cancelled'].includes(order.status) && nextStatus && (
               <button onClick={() => {
