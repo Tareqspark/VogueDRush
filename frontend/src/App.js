@@ -159,7 +159,12 @@ const BranchSelector = () => {
     // Use the base URL directly — no auth needed for GET /branches
     const base = typeof window !== 'undefined' ? `${window.location.origin}/api` : '/api';
     fetch(`${base}/branches`)
-      .then(r => r.json())
+      .then(r => {
+        // Without this a 500 falls through to the empty state and renders a
+        // blank page instead of surfacing the error and the Retry button.
+        if (!r.ok) throw new Error(`Branches request failed (${r.status})`);
+        return r.json();
+      })
       .then(data => {
         setBranches(data.branches || []);
         setLoading(false);
@@ -175,6 +180,8 @@ const BranchSelector = () => {
     { bg: 'from-emerald-500 to-emerald-700', icon: '🍃' },
     { bg: 'from-amber-500 to-amber-700',  icon: '⭐' },
   ];
+
+  const activeBranches = branches.filter(b => b.is_active);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6"
@@ -195,9 +202,14 @@ const BranchSelector = () => {
             <p className="text-slate-500 mb-4">Could not load branches. Check your connection.</p>
             <button onClick={fetchBranches} className="btn btn-primary">Retry</button>
           </div>
+        ) : activeBranches.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-slate-500 mb-4">No active branches yet. Ask an admin to add one.</p>
+            <button onClick={fetchBranches} className="btn btn-primary">Retry</button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {branches.filter(b => b.is_active).map((branch, i) => {
+            {activeBranches.map((branch, i) => {
               const style = BRANCH_STYLES[i % BRANCH_STYLES.length];
               return (
                 <button

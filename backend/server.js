@@ -535,6 +535,27 @@ server.listen(PORT, async () => {
   await patch('food_items.branch_id backfill to branch 1',
     `UPDATE food_items SET branch_id = 1 WHERE branch_id IS NULL`);
 
+  // Must precede every patch below — they all FK to branches(id). Databases created
+  // before branches was added to schema.sql never get it from migrate.js, which
+  // skips any database that already has tables.
+  await patch('branches table', `
+    CREATE TABLE IF NOT EXISTS branches (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      code VARCHAR(20) UNIQUE NOT NULL,
+      address VARCHAR(255),
+      phone VARCHAR(30),
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+
+  // Branch 1 must exist — the backfills above point every existing row at it.
+  await patch('branches default row', `
+    INSERT INTO branches (id, name, code, address, is_active)
+    SELECT 1, 'Main Branch', 'MAIN', NULL, TRUE FROM DUAL
+    WHERE NOT EXISTS (SELECT 1 FROM branches)`);
+
   await patch('branch_hours table', `
     CREATE TABLE IF NOT EXISTS branch_hours (
       id INT AUTO_INCREMENT PRIMARY KEY,
