@@ -1,4 +1,6 @@
 // Shared receipt formatting — one data layer, two renderers (browser HTML print, Sunmi native print).
+import toast from 'react-hot-toast';
+
 const RECEIPT_CSS = `@page{size:58mm auto;margin:0}
 body{font-family:monospace;font-size:11px;padding:2mm;width:54mm;margin:auto;box-sizing:border-box}
 h2{text-align:center;font-size:13px;margin:4px 0}p{text-align:center;margin:2px 0;color:#555}
@@ -175,19 +177,35 @@ function toSpec(d) {
   return spec;
 }
 
+// The spec carries numeric alignment (0/1/2) matching the native Sunmi SDK docs, but the
+// Capacitor wrapper exposes AlignmentModeEnum as strings — map across the boundary.
+const ALIGN = ['left', 'center', 'right'];
+
 // Interprets the spec against the Sunmi Capacitor bridge (window.Capacitor.Plugins.SunmiPrinter).
-// Method names confirmed against @kduma-autoid/capacitor-sunmi-printer; plugin key TBC once installed (Phase C).
+// Signatures verified against @kduma-autoid/capacitor-sunmi-printer 0.5.6.
 async function printViaSunmi(bridge, spec) {
-  await bridge.bindService?.();
+  await bridge.bindService();
+  await bridge.printerInit();
   for (const line of spec) {
     if (line.type === 'divider') {
+      await bridge.setBold({ enable: false });
+      await bridge.setAlignment({ alignment: 'left' });
       await bridge.printText({ text: '--------------------------------\n' });
     } else if (line.type === 'text') {
-      await bridge.setAlignment?.({ alignment: line.align ?? 0 });
+      await bridge.setAlignment({ alignment: ALIGN[line.align ?? 0] });
+      await bridge.setBold({ enable: !!line.bold });
       await bridge.printText({ text: `${line.text}\n` });
     } else if (line.type === 'row') {
-      await bridge.printColumnsText({ texts: line.cols, widths: line.widths, align: line.align });
+      await bridge.setBold({ enable: !!line.bold });
+      await bridge.printColumnsText({
+        lines: line.cols.map((text, i) => ({
+          text:  String(text),
+          width: line.widths[i],
+          align: ALIGN[line.align?.[i] ?? 0],
+        })),
+      });
     } else if (line.type === 'feed') {
+      await bridge.setBold({ enable: false });
       await bridge.lineWrap({ lines: line.lines });
     }
   }
@@ -204,7 +222,15 @@ export async function printReceipt({ type, order, items = [], restaurant = {} })
   const sunmi = window.Capacitor?.Plugins?.SunmiPrinter;
   if (sunmi) {
     await printViaSunmi(sunmi, toSpec(data));
-  } else {
-    openAndPrint(toHtml(data));
+    return;
   }
+  // Inside the Android shell there is no browser print dialog, so openAndPrint would
+  // do nothing at all. Tell the user rather than leaving a dead button. Callers don't
+  // all catch (some invoke this without await), so report instead of throwing.
+  if (window.Capacitor?.isNativePlatform?.()) {
+    console.warn('Sunmi printer bridge unavailable — this device has no attached printer.');
+    toast.error('No printer on this device. Use a Sunmi terminal to print.');
+    return;
+  }
+  openAndPrint(toHtml(data));
 }
