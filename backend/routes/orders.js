@@ -442,10 +442,17 @@ router.get('/:id', validateId, async (req, res) => {
                  AND JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.status')) = 'cancelled'
                ORDER BY a.created_at DESC
                LIMIT 1
-             ) AS cancellation_reason
+             ) AS cancellation_reason,
+             p.payment_method, p.transaction_id
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
+      -- Latest completed payment, so a re-printed bill can still show how it was paid.
+      LEFT JOIN payments p ON p.id = (
+        SELECT p2.id FROM payments p2
+        WHERE p2.order_id = o.id AND p2.status = 'completed'
+        ORDER BY p2.created_at DESC LIMIT 1
+      )
       WHERE o.id = ?
     `;
     

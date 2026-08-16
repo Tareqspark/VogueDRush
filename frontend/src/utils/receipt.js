@@ -28,7 +28,9 @@ const fmt = (n) => parseFloat(n || 0).toFixed(2);
 const activeItems = (items) => (items || []).filter(i => i.status !== 'cancelled');
 
 // Normalizes order/items/restaurant into one plain object consumed by both renderers below.
-export function buildReceiptData({ type, order, items = [], restaurant = {} }) {
+const PAYMENT_LABELS = { cash: 'Cash', bkash: 'bKash', nagad: 'Nagad', card: 'Card' };
+
+export function buildReceiptData({ type, order, items = [], restaurant = {}, payment = null }) {
   const currency = restaurant.currency || '৳';
   const rows = activeItems(items).map(i => ({
     name: i.item_name || i.name || '',
@@ -62,6 +64,15 @@ export function buildReceiptData({ type, order, items = [], restaurant = {} }) {
     totalPayable: fmt(order.total_amount),
     orderType: order.order_type,
     cancellationReason: order.cancellation_reason || '',
+    // Fresh prints get `payment` from the bill endpoint; re-prints fall back to the
+    // payment joined onto the order record.
+    paymentMode: (() => {
+      const m = payment?.payment_method || order.payment_method;
+      if (!m) return null;
+      const last4 = payment?.payment_last4
+        || (order.transaction_id ? String(order.transaction_id).split('-')[1] : null);
+      return (PAYMENT_LABELS[m] || m) + (last4 ? ` ****${last4}` : '');
+    })(),
     printedAt: new Date().toLocaleString(),
   };
 }
@@ -151,11 +162,20 @@ function toHtml(d) {
   <tr><td><strong>Total</strong></td><td><strong>${d.currency}${d.grossTotal}</strong></td></tr>
   ${discRow}
   <tr class="total"><td>Total Payable</td><td>${d.currency}${d.totalPayable}</td></tr></table>
+  ${d.paymentMode ? `<div class="divider"></div>
+  <table class="totals"><tr><td><strong>Payment Mode</strong></td><td><strong>${d.paymentMode}</strong></td></tr></table>` : ''}
   <div class="divider"></div>
   ${banner}
   <p class="footer">Thank you for dining with us!</p><p class="footer">Please come again</p>
   </body></html>`;
 }
+
+// Column weights for thermal rows. The Sunmi 58mm head fits 32 characters, but a
+// right-aligned column ending exactly at 32 loses its last character to a wrap, so
+// every row totals 30 and leaves two columns of margin.
+const ITEM_COLS = [15, 4, 11];   // Item / Qty / Amount
+const SUM_COLS  = [18, 12];      // label / value
+const KITCHEN_COLS = [22, 8];    // item / xQty — narrower first column pulls "x" left
 
 // Printer-agnostic instruction list — consumed by the Sunmi bridge interpreter (align: 0=left,1=center,2=right).
 function toSpec(d) {
@@ -176,7 +196,7 @@ function toSpec(d) {
     d.rows.forEach(r => spec.push({
       type: 'row',
       cols: [r.name, `x${r.qty}`],
-      widths: [24, 8],
+      widths: KITCHEN_COLS,
       align: [0, 2],
       bold: true,
     }));
@@ -220,15 +240,22 @@ function toSpec(d) {
   if (d.customerName) spec.push({ type: 'text', text: `Customer: ${d.customerName}`, align: 0 });
   if (d.servedBy) spec.push({ type: 'text', text: `Served by: ${d.servedBy}`, align: 0 });
   spec.push({ type: 'divider' });
-  spec.push({ type: 'row', cols: ['Item', 'Qty', 'Amount'], widths: [16, 4, 12], align: [0, 1, 2] });
-  d.rows.forEach(r => spec.push({ type: 'row', cols: [r.name, String(r.qty), `${d.currency}${r.amount}`], widths: [16, 4, 12], align: [0, 1, 2] }));
+  // Widths total 30, not the printer's full 32. At exactly 32 the final character of a
+  // right-aligned last column wraps to its own line ("Amount" printed as "Amoun"+"t"),
+  // so leave two columns of slack.
+  spec.push({ type: 'row', cols: ['Item', 'Qty', 'Amount'], widths: ITEM_COLS, align: [0, 1, 2] });
+  d.rows.forEach(r => spec.push({ type: 'row', cols: [r.name, String(r.qty), `${d.currency}${r.amount}`], widths: ITEM_COLS, align: [0, 1, 2] }));
   spec.push({ type: 'divider' });
-  spec.push({ type: 'row', cols: ['Food Price', `${d.currency}${d.subtotal}`], widths: [20, 12], align: [0, 2] });
-  if (d.vatAmount) spec.push({ type: 'row', cols: ['VAT', `${d.currency}${d.vatAmount}`], widths: [20, 12], align: [0, 2] });
-  if (d.serviceCharge) spec.push({ type: 'row', cols: ['Service Charge', `${d.currency}${d.serviceCharge}`], widths: [20, 12], align: [0, 2] });
-  spec.push({ type: 'row', cols: ['Total', `${d.currency}${d.grossTotal}`], widths: [20, 12], align: [0, 2], bold: true });
-  if (d.discountAmount) spec.push({ type: 'row', cols: ['Discount', `-${d.currency}${d.discountAmount}`], widths: [20, 12], align: [0, 2] });
-  spec.push({ type: 'row', cols: ['Total Payable', `${d.currency}${d.totalPayable}`], widths: [20, 12], align: [0, 2], bold: true });
+  spec.push({ type: 'row', cols: ['Food Price', `${d.currency}${d.subtotal}`], widths: SUM_COLS, align: [0, 2] });
+  if (d.vatAmount) spec.push({ type: 'row', cols: ['VAT', `${d.currency}${d.vatAmount}`], widths: SUM_COLS, align: [0, 2] });
+  if (d.serviceCharge) spec.push({ type: 'row', cols: ['Service Charge', `${d.currency}${d.serviceCharge}`], widths: SUM_COLS, align: [0, 2] });
+  spec.push({ type: 'row', cols: ['Total', `${d.currency}${d.grossTotal}`], widths: SUM_COLS, align: [0, 2], bold: true });
+  if (d.discountAmount) spec.push({ type: 'row', cols: ['Discount', `-${d.currency}${d.discountAmount}`], widths: SUM_COLS, align: [0, 2] });
+  spec.push({ type: 'row', cols: ['Total Payable', `${d.currency}${d.totalPayable}`], widths: SUM_COLS, align: [0, 2], bold: true });
+  if (d.paymentMode) {
+    spec.push({ type: 'divider' });
+    spec.push({ type: 'row', cols: ['Payment Mode', d.paymentMode], widths: SUM_COLS, align: [0, 2], bold: true });
+  }
   spec.push({ type: 'divider' });
   if (d.type === 'due') {
     spec.push({ type: 'text', text: '*** DUE - PAYMENT PENDING ***', align: 1, bold: true });

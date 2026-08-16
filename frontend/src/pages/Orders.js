@@ -355,7 +355,7 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
     });
     setPrinting(false);
     if (data) {
-      await printReceipt({ type: 'bill', order: data.order, items: data.items, restaurant: data.restaurant });
+      await printReceipt({ type: 'bill', order: data.order, items: data.items, restaurant: data.restaurant, payment: data.payment });
       setShowBillPopup(false);
       toast.success('Bill printed! Order auto-completed.');
       onClose();
