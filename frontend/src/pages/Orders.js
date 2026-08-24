@@ -614,11 +614,6 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
     ['order-detail-edit', orderId],
     () => api.get(`/orders/${orderId}`).then(r => r.data)
   );
-  const { data: restaurantConfig } = useQuery(
-    'restaurant-config',
-    () => api.get('/settings/config/restaurant').then(r => r.data),
-    { staleTime: 5 * 60 * 1000 }
-  );
   const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
   const { data: itemsData } = useQuery(['menu-items-edit', categoryFilter, search],
     () => api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: search || undefined } }).then(r => r.data)
@@ -684,9 +679,6 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   }, 0);
   const addSub = toAdd.reduce((s, i) => s + i.price * i.quantity, 0);
   const previewSub = remaining + addSub;
-  const vatRate = (restaurantConfig?.vat_percentage ?? 15) / 100;
-  const svcRate = order?.order_type === 'dine_in' ? (restaurantConfig?.service_charge_percentage ?? 10) / 100 : 0;
-  const previewTotal = previewSub * (1 + vatRate + svcRate);
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-sky-950/30 backdrop-blur-sm">
@@ -848,8 +840,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
           </div>
           <div className="p-4 border-t border-slate-200 space-y-3 bg-white">
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
-              <div className="flex justify-between text-slate-500 text-xs"><span>New Subtotal</span><span>৳{previewSub.toFixed(2)}</span></div>
-              <div className="flex justify-between font-black text-slate-800 border-t border-slate-200 pt-2"><span>Est. Total</span><span>৳{previewTotal.toFixed(2)}</span></div>
+              <div className="flex justify-between font-black text-slate-800"><span>New Subtotal</span><span>৳{previewSub.toFixed(2)}</span></div>
             </div>
             <button onClick={save} disabled={saving || (Object.keys(itemQties).length === 0 && toAdd.length === 0)}
               className="btn btn-primary w-full disabled:opacity-50 justify-center">

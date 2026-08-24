@@ -512,12 +512,16 @@ router.get('/config/restaurant', async (req, res) => {
       address: config.restaurant_address || '',
       phone: config.restaurant_phone || '',
       currency: config.currency_symbol || '৳',
-      vat_percentage: config.vat_percentage || 15,
-      service_charge_percentage: config.service_charge_percentage || 10,
-      enable_delivery: config.enable_delivery || false,
-      delivery_fee: config.delivery_fee || 0,
-      advance_payment_required: config.advance_payment_required || false,
-      min_advance_percentage: config.min_advance_percentage || 30
+      // ?? not || — these are parseFloat'd above, so a configured 0 is falsy and
+      // `||` silently replaced it with the default. Setting service charge to 0
+      // still reported 10%, and the order-entry cart previewed a charge the
+      // server was never going to apply.
+      vat_percentage: config.vat_percentage ?? 15,
+      service_charge_percentage: config.service_charge_percentage ?? 10,
+      enable_delivery: config.enable_delivery ?? false,
+      delivery_fee: config.delivery_fee ?? 0,
+      advance_payment_required: config.advance_payment_required ?? false,
+      min_advance_percentage: config.min_advance_percentage ?? 30
     };
     
     res.json(restaurantConfig);

@@ -91,9 +91,11 @@ const calculateOrderTotals = async (items, orderType, connection = null, branchI
   const settingsMap = {};
   settingsRows.forEach(s => { settingsMap[s.setting_key] = s.setting_value; });
 
-  const vatPercentage = parseFloat(settingsMap.vat_percentage || 15);
-  const serviceChargePercentage = orderType === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
-  const deliveryFee = orderType === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;
+  // ?? not || — a configured "0" must survive. (Raw strings here so "0" is truthy,
+  // but an empty setting would otherwise silently become the default.)
+  const vatPercentage = parseFloat(settingsMap.vat_percentage ?? 15) || 0;
+  const serviceChargePercentage = orderType === 'dine_in' ? (parseFloat(settingsMap.service_charge_percentage ?? 10) || 0) : 0;
+  const deliveryFee = orderType === 'delivery' ? (parseFloat(settingsMap.delivery_fee ?? 0) || 0) : 0;
 
   const vatAmount = (subtotal * vatPercentage) / 100;
   const serviceCharge = (subtotal * serviceChargePercentage) / 100;
@@ -1206,11 +1208,11 @@ router.put('/:id/items', validateId, async (req, res) => {
       // VAT must come from the same global setting calculateOrderTotals() uses on create.
       // This previously summed food_items.vat_rate, which defaults to 0.00 and is never
       // set from the UI — so any modification silently zeroed the VAT off the order.
-      const vatPct = parseFloat(settingsMap.vat_percentage || 15);
+      const vatPct = parseFloat(settingsMap.vat_percentage ?? 15) || 0;
       const vatAmount = (subtotal * vatPct) / 100;
 
-      const svcPct = order.order_type === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
-      const deliveryFee = order.order_type === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;
+      const svcPct = order.order_type === 'dine_in' ? (parseFloat(settingsMap.service_charge_percentage ?? 10) || 0) : 0;
+      const deliveryFee = order.order_type === 'delivery' ? (parseFloat(settingsMap.delivery_fee ?? 0) || 0) : 0;
       const serviceCharge = (subtotal * svcPct) / 100;
       const totalAmount = subtotal + vatAmount + serviceCharge + deliveryFee;
 
