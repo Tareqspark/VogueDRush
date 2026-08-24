@@ -245,7 +245,7 @@ function UserFormModal({ api, user, onClose, onSaved }) {
   const save = async (e) => {
     e.preventDefault();
     if (!user && !form.password) return toast.error('Password is required for new users');
-    if (form.password && form.password.length < 6) return toast.error('Password must be at least 6 characters');
+    if (form.password && form.password.length < 8) return toast.error('Password must be at least 8 characters');
     setSaving(true);
     try {
       const payload = { ...form };
@@ -259,7 +259,11 @@ function UserFormModal({ api, user, onClose, onSaved }) {
       }
       onSaved();
     } catch (err) {
-      toast.error(err.response?.data?.error || err.response?.data?.details?.[0]?.message || 'Failed to save user');
+      const d = err.response?.data;
+      const detail = d?.details?.length
+        ? d.details.map(x => `${x.field}: ${x.message}`).join(' · ')
+        : null;
+      toast.error(detail || d?.error || 'Failed to save user');
     } finally {
       setSaving(false);
     }
@@ -318,7 +322,7 @@ function UserFormModal({ api, user, onClose, onSaved }) {
           <div>
             <label className="label">{user ? 'New Password (leave blank to keep)' : 'Password *'}</label>
             <input className="input" type="password" {...f('password')}
-              placeholder={user ? 'Leave blank to keep current' : 'Minimum 6 characters'} />
+              placeholder={user ? 'Leave blank to keep current' : 'Minimum 8 characters'} />
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="is_active_chk" checked={!!form.is_active}

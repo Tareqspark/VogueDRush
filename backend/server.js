@@ -560,6 +560,11 @@ server.listen(PORT, async () => {
   await patch('users.branch_id',
     `ALTER TABLE users ADD COLUMN branch_id INT NULL DEFAULT NULL`);
 
+  // The Users screen offers Manager and 25 endpoints gate on requireRole(['admin','manager']),
+  // but the column enum never included it — creating a manager failed at INSERT.
+  await patch('users.role includes manager',
+    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','manager','waiter','kitchen') NOT NULL DEFAULT 'waiter'`);
+
   await patch('tables.branch_id',
     `ALTER TABLE tables ADD COLUMN branch_id INT NULL DEFAULT NULL`);
 

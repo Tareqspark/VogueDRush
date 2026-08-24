@@ -32,7 +32,7 @@ const validateUser = [
     .withMessage('Full name must be between 2 and 100 characters')
     .trim(),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Valid phone number is required'),
   body('role')
@@ -91,7 +91,7 @@ const validateOrder = [
     .isInt({ min: 1 })
     .withMessage('Quantity must be at least 1'),
   body('special_instructions')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Special instructions must not exceed 500 characters'),
   handleValidationErrors
@@ -107,7 +107,7 @@ const validateFoodItem = [
     .withMessage('Name must be between 2 and 100 characters')
     .trim(),
   body('description')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Description must not exceed 500 characters'),
   body('price')
@@ -118,11 +118,11 @@ const validateFoodItem = [
     .isFloat({ min: 0 })
     .withMessage('Promotional price must be a positive number'),
   body('vat_rate')
-    .optional()
+    .optional({ checkFalsy: true })
     .isFloat({ min: 0, max: 100 })
     .withMessage('VAT rate must be between 0 and 100'),
   body('preparation_time')
-    .optional()
+    .optional({ checkFalsy: true })
     .isInt({ min: 1 })
     .withMessage('Preparation time must be at least 1 minute'),
   handleValidationErrors
@@ -135,11 +135,11 @@ const validateFoodCategory = [
     .withMessage('Category name must be between 2 and 50 characters')
     .trim(),
   body('description')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 200 })
     .withMessage('Description must not exceed 200 characters'),
   body('icon')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 100 })
     .withMessage('Icon must not exceed 100 characters'),
   handleValidationErrors
@@ -152,12 +152,12 @@ const validateTable = [
     .withMessage('Table number must be between 1 and 20 characters')
     .trim(),
   body('capacity')
-    .optional()
+    .optional({ checkFalsy: true })
     .customSanitizer(v => parseInt(v) || 4)
     .isInt({ min: 1, max: 50 })
     .withMessage('Capacity must be between 1 and 50'),
   body('location')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 100 })
     .withMessage('Location must not exceed 100 characters'),
   handleValidationErrors
@@ -173,7 +173,7 @@ const validateReservation = [
     .isMobilePhone()
     .withMessage('Valid customer phone is required'),
   body('customer_email')
-    .optional()
+    .optional({ checkFalsy: true })
     .isEmail()
     .withMessage('Valid email is required'),
   body('party_size')
@@ -204,7 +204,7 @@ const validateReservation = [
       return true;
     }),
   body('special_requests')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Special requests must not exceed 500 characters'),
   handleValidationErrors
@@ -220,11 +220,11 @@ const validateDeliveryDetails = [
     .isMobilePhone()
     .withMessage('Valid delivery phone is required'),
   body('advance_payment')
-    .optional()
+    .optional({ checkFalsy: true })
     .isFloat({ min: 0 })
     .withMessage('Advance payment must be a positive number'),
   body('delivery_notes')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Delivery notes must not exceed 500 characters'),
   handleValidationErrors
@@ -241,11 +241,11 @@ const validateId = [
 // Date range validation for reports
 const validateDateRange = [
   query('start_date')
-    .optional()
+    .optional({ checkFalsy: true })
     .isISO8601()
     .withMessage('Valid start date is required'),
   query('end_date')
-    .optional()
+    .optional({ checkFalsy: true })
     .isISO8601()
     .withMessage('Valid end date is required')
     .custom((value, { req }) => {
