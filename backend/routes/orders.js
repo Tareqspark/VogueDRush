@@ -1187,22 +1187,27 @@ router.put('/:id/items', validateId, async (req, res) => {
 
       // Recalculate totals from active items
       const [activeItems] = await conn.query(
-        "SELECT oi.*, fi.vat_rate FROM order_items oi JOIN food_items fi ON oi.food_item_id = fi.id WHERE oi.order_id = ? AND oi.status != 'cancelled'",
+        "SELECT oi.* FROM order_items oi WHERE oi.order_id = ? AND oi.status != 'cancelled'",
         [id]
       );
 
-      let subtotal = 0, vatAmount = 0;
+      let subtotal = 0;
       for (const ai of activeItems) {
         subtotal += parseFloat(ai.total_price);
-        vatAmount += (parseFloat(ai.total_price) * parseFloat(ai.vat_rate)) / 100;
       }
 
       // M-4: also apply delivery_fee on recalculation
       const [settingsRows] = await conn.query(
-        "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('service_charge_percentage', 'delivery_fee')"
+        "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('vat_percentage', 'service_charge_percentage', 'delivery_fee')"
       );
       const settingsMap = {};
       settingsRows.forEach(r => { settingsMap[r.setting_key] = r.setting_value; });
+
+      // VAT must come from the same global setting calculateOrderTotals() uses on create.
+      // This previously summed food_items.vat_rate, which defaults to 0.00 and is never
+      // set from the UI — so any modification silently zeroed the VAT off the order.
+      const vatPct = parseFloat(settingsMap.vat_percentage || 15);
+      const vatAmount = (subtotal * vatPct) / 100;
 
       const svcPct = order.order_type === 'dine_in' ? parseFloat(settingsMap.service_charge_percentage || 10) : 0;
       const deliveryFee = order.order_type === 'delivery' ? parseFloat(settingsMap.delivery_fee || 0) : 0;

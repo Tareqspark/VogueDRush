@@ -1032,10 +1032,16 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
     setCart(prev => prev.map(c => c.id === id ? { ...c, qty: Math.max(0, c.qty + delta) } : c).filter(c => c.qty > 0));
   };
 
+  // Mirror calculateOrderTotals() on the server: VAT always, service charge on
+  // dine-in, delivery fee on delivery. Previously this summed only subtotal + VAT,
+  // so the cart understated the real charge on every dine-in and delivery order.
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const vatRate = (restaurantConfig?.vat_percentage ?? 15) / 100;
+  const svcRate = orderType === 'dine_in' ? (restaurantConfig?.service_charge_percentage ?? 10) / 100 : 0;
+  const deliveryFee = orderType === 'delivery' ? parseFloat(restaurantConfig?.delivery_fee ?? 0) : 0;
   const vat = subtotal * vatRate;
-  const total = subtotal + vat;
+  const serviceCharge = subtotal * svcRate;
+  const total = subtotal + vat + serviceCharge + deliveryFee;
 
   const submit = async () => {
     if (cart.length === 0) return toast.error('Add items to cart');
@@ -1373,8 +1379,30 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
               value={specialInstructions}
               onChange={e => setSpecialInstructions(e.target.value)}
             />
+            {/* Break the total down — the waiter needs to show the customer what the
+                VAT uplift is, not just a total that mysteriously exceeds the menu price. */}
             <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm border border-slate-100">
-              <div className="flex justify-between font-black text-slate-800 text-base">
+              <div className="flex justify-between text-slate-500">
+                <span>Products Price</span><span>৳{subtotal.toFixed(2)}</span>
+              </div>
+              {vat > 0 && (
+                <div className="flex justify-between text-slate-500">
+                  <span>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 ? 2 : 0)}%)</span>
+                  <span>৳{vat.toFixed(2)}</span>
+                </div>
+              )}
+              {serviceCharge > 0 && (
+                <div className="flex justify-between text-slate-500">
+                  <span>Service Charge ({(svcRate * 100).toFixed(svcRate * 100 % 1 ? 2 : 0)}%)</span>
+                  <span>৳{serviceCharge.toFixed(2)}</span>
+                </div>
+              )}
+              {deliveryFee > 0 && (
+                <div className="flex justify-between text-slate-500">
+                  <span>Delivery Fee</span><span>৳{deliveryFee.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-black text-slate-800 text-base border-t border-slate-200 pt-1.5">
                 <span>Total Payable</span><span>৳{total.toFixed(2)}</span>
               </div>
             </div>
