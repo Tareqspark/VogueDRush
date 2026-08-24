@@ -183,6 +183,85 @@ function ServiceChargePresetsCard({ api }) {
   );
 }
 
+// ── Danger Zone: clear order history ──────────────────────────────────────
+// Deletes orders and everything hanging off them. Menu, tables, users, branches,
+// suppliers, inventory and settings are untouched. Typed confirmation on purpose:
+// this destroys trading history and there is no undo.
+function ClearOrdersCard({ api }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post('/admin/clear-orders', { confirm: 'DELETE' });
+      const n = data?.deleted?.orders ?? 0;
+      toast.success(`Cleared ${n} order${n === 1 ? '' : 's'} and all related records`);
+      setOpen(false);
+      setConfirmText('');
+      queryClient.invalidateQueries();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to clear order data');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card border-2 border-rose-200">
+      <div className="p-4 border-b border-rose-100 bg-rose-50/60 rounded-t-2xl">
+        <h2 className="font-black text-rose-700">Danger Zone</h2>
+        <p className="text-xs text-rose-500 mt-0.5">Irreversible actions — no undo</p>
+      </div>
+      <div className="p-4 space-y-3">
+        <div>
+          <p className="font-semibold text-slate-800 text-sm">Clear all order data</p>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+            Permanently deletes every order along with its items, payments, kitchen
+            queue entries, delivery records and modifications. Menu, tables, users,
+            branches, suppliers, inventory and settings are <strong>not</strong> touched.
+          </p>
+        </div>
+
+        {!open ? (
+          <button onClick={() => setOpen(true)} className="btn btn-error flex items-center gap-2">
+            <TrashIcon className="h-4 w-4" /> Clear Order Data
+          </button>
+        ) : (
+          <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 space-y-2">
+            <p className="text-xs text-rose-700 font-semibold">
+              Type <span className="font-mono bg-white px-1 rounded border border-rose-200">DELETE</span> to confirm.
+              This cannot be undone.
+            </p>
+            <input
+              className="input w-full"
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              placeholder="DELETE"
+              autoFocus
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={run}
+                disabled={busy || confirmText !== 'DELETE'}
+                className="btn btn-error disabled:opacity-40 flex items-center gap-2">
+                {busy ? <LoadingSpinner size="sm" /> : <TrashIcon className="h-4 w-4" />}
+                Permanently delete
+              </button>
+              <button
+                onClick={() => { setOpen(false); setConfirmText(''); }}
+                disabled={busy}
+                className="btn btn-secondary">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { api } = useAuth();
   const queryClient = useQueryClient();
@@ -258,6 +337,9 @@ export default function Settings() {
 
       {/* Service Charge Types */}
       <ServiceChargePresetsCard api={api} />
+
+      {/* Danger Zone */}
+      <ClearOrdersCard api={api} />
 
       {/* Ungrouped settings */}
       {(() => {

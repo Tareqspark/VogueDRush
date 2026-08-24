@@ -410,6 +410,56 @@ app.post('/api/admin/reset-data', authenticateToken, async (req, res) => {
     res.json({ success: true, message: 'All data cleared. Admin user kept.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Clear ORDER data only — orders and everything hanging off them. Menu, tables,
+// users, branches, suppliers, inventory and settings are deliberately untouched.
+// Requires an explicit confirm string so a stray POST can't wipe trading history.
+app.post('/api/admin/clear-orders', authenticateToken, async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (req.body?.confirm !== 'DELETE') {
+    return res.status(400).json({ error: "Confirmation required: send { confirm: 'DELETE' }" });
+  }
+  try {
+    const { query } = require('./config/database');
+
+    // Children first. Every FK here is ON DELETE CASCADE so deleting orders alone
+    // would suffice, but explicit ordering lets us report what was removed.
+    // reservations.pre_order_id is ON DELETE SET NULL — reservations survive.
+    const tables = [
+      'delivery_tracking', 'delivery_details', 'order_modifications',
+      'kitchen_queue', 'payments', 'order_items', 'orders',
+    ];
+
+    const exists = async (t) => {
+      const [r] = await query(
+        'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+        [t]
+      );
+      return r.c > 0;
+    };
+
+    const deleted = {};
+    await query('SET FOREIGN_KEY_CHECKS = 0');
+    try {
+      for (const t of tables) {
+        if (!(await exists(t))) continue;
+        const [before] = await query(`SELECT COUNT(*) AS c FROM \`${t}\``);
+        await query(`DELETE FROM \`${t}\``);
+        await query(`ALTER TABLE \`${t}\` AUTO_INCREMENT = 1`);
+        deleted[t] = before.c;
+      }
+    } finally {
+      await query('SET FOREIGN_KEY_CHECKS = 1');
+    }
+
+    const total = Object.values(deleted).reduce((a, b) => a + b, 0);
+    console.log(`[clear-orders] ${req.user.username} removed ${total} row(s):`, deleted);
+    res.json({ success: true, deleted, total, message: `Cleared ${deleted.orders || 0} order(s).` });
+  } catch (e) {
+    console.error('Clear orders error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 
 // API Routes with specific rate limiting
