@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
-import { PlusIcon, PencilIcon, XMarkIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, XMarkIcon, MagnifyingGlassIcon, PrinterIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import { printMenu } from '../utils/menuPrint';
 
 export default function Menu() {
   const { api, selectedBranch } = useAuth();
@@ -13,6 +14,7 @@ export default function Menu() {
   const [catFilter, setCatFilter] = useState('');
   const [showItemModal, setShowItemModal] = useState(null); // null | 'new' | item object
   const [showCatModal, setShowCatModal] = useState(null);
+  const [printing, setPrinting] = useState(false);
 
   const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
   const { data: itemsData, isLoading } = useQuery(
@@ -22,6 +24,32 @@ export default function Menu() {
 
   const categories = categoriesData || [];
   const items = itemsData?.items || [];
+
+  // Print the whole menu, not the filtered view — a search or category filter on
+  // screen must not silently omit dishes from the printed book. Fetches fresh and
+  // asks only for available items, since a menu shouldn't list disabled dishes.
+  const handlePrintMenu = async () => {
+    setPrinting(true);
+    try {
+      const [itemsRes, cfgRes] = await Promise.all([
+        api.get('/menu/items', { params: { is_available: true, limit: 500 } }).then(r => r.data),
+        api.get('/settings/config/restaurant').then(r => r.data).catch(() => ({})),
+      ]);
+      const all = itemsRes?.items || [];
+      if (all.length === 0) {
+        toast.error('No available menu items to print');
+        return;
+      }
+      printMenu({
+        items: all,
+        restaurant: { ...cfgRes, branchName: selectedBranch?.name || '' },
+      });
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to build menu');
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const toggleAvailability = async (item) => {
     try {
@@ -46,16 +74,24 @@ export default function Menu() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Menu Management</h1>
           {selectedBranch && <p className="text-xs text-violet-600 font-semibold mt-0.5">🏢 {selectedBranch.name} — branch menu only</p>}
         </div>
-        <button
-          onClick={() => tab === 'items' ? setShowItemModal('new') : setShowCatModal('new')}
-          className="btn btn-primary flex items-center gap-2">
-          <PlusIcon className="h-4 w-4" /> Add {tab === 'items' ? 'Item' : 'Category'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handlePrintMenu}
+            disabled={printing}
+            className="btn btn-secondary flex items-center gap-2 disabled:opacity-50">
+            {printing ? <LoadingSpinner size="sm" /> : <PrinterIcon className="h-4 w-4" />} Print Menu
+          </button>
+          <button
+            onClick={() => tab === 'items' ? setShowItemModal('new') : setShowCatModal('new')}
+            className="btn btn-primary flex items-center gap-2">
+            <PlusIcon className="h-4 w-4" /> Add {tab === 'items' ? 'Item' : 'Category'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
