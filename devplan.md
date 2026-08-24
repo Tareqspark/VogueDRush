@@ -1,189 +1,184 @@
-# Dev Plan — Consolidate the Expenses Module (retire System B)
+# Dev Plan — Expense Module
 
-**Status:** proposed, not started
-**Author:** drafted 2026-08-24
-**Goal:** one expense system per branch, and a P&L that actually counts expenses.
+**Status:** Phase 0 done · Phase 1 ready to start
+**Updated:** 2026-08-24
+**Goal:** one expense system per branch, counted correctly in P&L, trustworthy enough
+to run a branch from.
 
 ---
 
-## 1. Why this is needed
+## 0. What is already true
 
-FoodPark currently has **two independent expense systems**. They write to different
-tables and neither knows the other exists.
+Verified against production on 2026-08-24, not assumed.
 
-| | **System A** (keep) | **System B** (retire) |
+### Both expense tables are empty
+
+```
+branch_expenses    0 rows    0.00
+expenses           0 rows    0.00
+orders_all         0 rows    0.00
+```
+
+**This removes the migration entirely.** The earlier draft of this plan was built
+around moving live financial records — dry runs, category mapping, idempotency tags,
+backups, keeping the old table for a reporting cycle. None of that is needed. There is
+nothing to move and nothing to lose.
+
+### System A already does most of the job
+
+`expenses` table · `/api/expenses` · `frontend/src/pages/Expenses.js` (308 lines)
+
+Already working:
+
+- Full CRUD — create, edit, delete, list
+- Fields: date, amount, category, description, `payment_mode`, `reference`, `notes`
+- Category input is a datalist: 10 seeded values plus every category used before
+  (`backend/routes/expenses.js:9`, `:12`)
+- Filters by date range and category
+- `GET /summary` — totals per category plus a grand total
+- `router.use(scopeBranch)` — non-admins are hard-locked to their own branch and
+  **fail closed** (`scopedBranchId = -1`) when unassigned
+- Writes restricted to admin + manager
+
+### Manager P&L access — shipped
+
+Commit `e7f571c`. `/branches/pl-report` now accepts admin or manager; a manager's
+branch comes from `req.user.branch_id`, never the query string, so another `branch_id`
+cannot widen what they see. Branch pickers are hidden for non-admins in both P&L views.
+
+### System B still exists and still owns P&L
+
+`branch_expenses` · `/api/branches/expenses` · `ExpensesPanel` in `Branches.js`
+
+Admin-only, fixed 7-value enum, no payment mode or reference. **P&L reads this table**
+(`backend/routes/branches.js:403`), which is why expenses recorded in the Expenses page
+do not appear in profit figures.
+
+---
+
+## Phase 1 — Make it correct
+
+The whole point. Small, and now risk-free because both tables are empty.
+
+### 1.1 Repoint P&L at `expenses`
+
+`backend/routes/branches.js:403` — `FROM branch_expenses` → `FROM expenses`.
+Both tables expose `branch_id`, `category`, `amount`, `expense_date`, so the surrounding
+query is unchanged.
+
+**Acceptance:** record an expense in the Expenses page, open P&L for that branch and
+date range, see it in `total_expenses` and in `expenses_by_category`.
+
+### 1.2 Let admins record for a chosen branch
+
+`scopeBranch` gives admins `scopedBranchId = null` unless an `X-Branch-Id` header is
+set, and both `GET /expenses` (`:28`) and `POST /expenses` (`:87`) then return
+**400 Branch required**. System B let an admin post to any branch via a parameter;
+losing that is a regression.
+
+Accept an optional `branch_id` in body/query **for admins only**, falling back to
+`scopedBranchId`. Non-admins keep ignoring it entirely.
+
+**Acceptance:** an admin with no branch selected can list and create expenses by naming
+a branch; a manager passing `branch_id` for another branch still only touches their own.
+
+### 1.3 Retire System B
+
+| File | Lines | Action |
 |---|---|---|
-| Table | `expenses` | `branch_expenses` |
-| API | `/api/expenses` | `/api/branches/expenses` |
-| UI | **Expenses** page (sidebar) | `ExpensesPanel` inside Branch Management |
-| Who can use it | admin **+ manager** | **admin only** |
-| Categories | seeded list of 10, plus any used before | fixed 7-value SQL enum |
-| Extra fields | `payment_mode`, `reference`, `notes`, `updated_at` | none |
-| Branch scoping | automatic via `scopeBranch` | manual `branch_id` query param |
-| **Counted in P&L** | **no** | **yes** |
+| `backend/routes/branches.js` | 331, 351, 362 | delete the three `/expenses` routes |
+| `frontend/src/pages/Branches.js` | 353–465 | delete `ExpensesPanel` |
+| `frontend/src/pages/Branches.js` | 82–84, 230 | delete its toggle button and render site |
+| `backend/server.js` | 648–649 | delete the `branch_expenses` boot patch |
 
-### The live bug
+Drop the `branch_expenses` table in a separate follow-up, not in this change.
 
-`GET /branches/pl-report` computes expenses from `branch_expenses`
-(`backend/routes/branches.js:403`), but the Expenses page writes to `expenses`.
-
-Consequence: **every expense a manager records is invisible to P&L.** Gross profit
-and margin are overstated. Both consumers of that endpoint show the wrong number —
-`frontend/src/pages/Branches.js:476` and `frontend/src/pages/Reports.js:1638`.
-
-A branch with ৳450,000 revenue and ৳180,000 of expenses entered through the
-Expenses page reports ৳450,000 profit at a 100% margin. A near-100% margin is the
-symptom to look for.
-
-### Why System A is the survivor
-
-- Managers can use it; System B is admin-only, so the people who actually know the
-  branch's costs cannot enter them.
-- `router.use(scopeBranch)` means a non-admin is hard-locked to their own branch and
-  fails closed (`scopedBranchId = -1`) if unassigned — a manager cannot see another
-  branch's spending.
-- It already carries `payment_mode`, `reference` and `notes`, which are needed to
-  reconcile spending against bank and cash records.
-- Its UI is complete: `frontend/src/pages/Expenses.js`, 308 lines, list + filters +
-  summary + create/edit/delete.
+**Acceptance:** no reference to `branch_expenses` remains outside the dropped patch;
+Branch Management shows P&L and Transfers only.
 
 ---
 
-## 2. Scope
+## Phase 2 — Make it trustworthy
 
-### In scope
-- Migrate existing `branch_expenses` rows into `expenses`.
-- Repoint the P&L expense query at `expenses`.
-- Remove System B's endpoints, UI panel, and boot patch.
-- Close the admin-without-a-branch gap (see §5).
+Worth doing before real money is recorded, not after.
 
-### Explicitly out of scope
-- Changing the P&L revenue side. It reads `orders` and is correct.
-- Changing who may view P&L (currently admin-only) — see §7, open question.
-- Any new expense features (recurring expenses, approvals, budgets, attachments).
+### 2.1 Category discipline
+
+Free text invites `Utilities` / `utility` / `Electric Bill` as three separate categories,
+which quietly ruins category reporting — the exact thing an expense module exists for.
+System B's enum prevented this but was too rigid.
+
+Middle ground: keep the seeded list as the primary picker, allow a new category only
+through an explicit "add category" action, and normalise on save (trim, title-case).
+
+**Acceptance:** typing `utilities` and `Utilities` produces one category, not two.
+
+### 2.2 Audit fields
+
+`expenses` records `created_by` but not who last edited or deleted. For a table that
+represents money leaving the business, an edit with no author is a gap.
+
+Add `updated_by`, and log deletes through the existing `logManualAudit` helper.
+
+### 2.3 Server-side validation
+
+`POST /expenses` checks presence and `amount > 0` only. Add: no future `expense_date`
+beyond today, a sane upper bound on amount, and a description length limit.
 
 ---
 
-## 3. Every touchpoint
+## Phase 3 — Make it useful
 
-`branch_expenses` appears in exactly six places. There are no others.
+Only after Phases 1–2. Each is independently valuable; none is required for correctness.
 
-| File | Line | What it does | Action |
-|---|---|---|---|
-| `backend/server.js` | 648–649 | boot patch creating the table | remove after migration verified |
-| `backend/routes/branches.js` | 331 | `GET /branches/expenses` list | delete route |
-| `backend/routes/branches.js` | 351 | `POST /branches/expenses` insert | delete route |
-| `backend/routes/branches.js` | 362 | `DELETE /branches/expenses/:id` | delete route |
-| `backend/routes/branches.js` | 405 | **P&L expense subtotal** | **repoint to `expenses`** |
-| `frontend/src/pages/Branches.js` | 353–465 | `ExpensesPanel` component (~113 lines) | delete component + its toggle button (line 82–84) and render site (line 230) |
+- **Recurring expenses.** Rent, salaries and utilities repeat monthly. Entering them by
+  hand every month guarantees they will eventually be missed — and a missed expense
+  silently overstates profit. Highest-value item in this phase.
+- **CSV export.** Accountants want the raw rows. Note the WebView caveat: `<a download>`
+  does nothing inside the Android shell, so this is a desktop-only affordance.
+- **Budget vs actual.** A monthly budget per category, shown against actual on the
+  Expenses page and in P&L.
+- **Receipt attachments.** Needs file storage; heaviest item and the least urgent.
 
 ---
 
-## 4. Migration
+## Sequencing and effort
 
-### 4.1 Category mapping
-
-System B stores a lowercase enum; System A uses a Title-Case seeded list
-(`backend/routes/expenses.js:9`). Map on the way across:
-
-| `branch_expenses` | → `expenses` |
-|---|---|
-| `rent` | `Rent` |
-| `utilities` | `Utilities` |
-| `salaries` | `Salary` |
-| `supplies` | `Supplies` |
-| `maintenance` | `Maintenance` |
-| `marketing` | `Marketing` |
-| `other` | `Other` |
-
-Unmapped values fall back to `Other` rather than being dropped.
-
-### 4.2 Field mapping
-
-| `expenses` column | source | notes |
+| Phase | Work | Risk |
 |---|---|---|
-| `branch_id`, `amount`, `description`, `expense_date`, `created_by` | direct copy | |
-| `category` | mapped per §4.1 | |
-| `payment_mode` | `'cash'` | System B has no equivalent; cash is the safe default |
-| `reference`, `notes` | `NULL` | |
-| `description` | `COALESCE(be.description, 'Migrated expense')` | System B allows NULL, System A requires NOT NULL |
+| 1.1 Repoint P&L | one word | none — both tables empty |
+| 1.2 Admin branch override | one endpoint, both handlers | low |
+| 1.3 Retire System B | delete ~120 lines across 3 files | low |
+| 2.1 Category discipline | UI + normalise on save | low |
+| 2.2 Audit fields | one column + audit calls | low, needs a boot patch |
+| 2.3 Validation | a few checks | none |
+| 3.x | each independent | medium |
 
-### 4.3 Ordering and safety
-
-1. **Dry run first.** Count rows per branch and total amount. Report before writing.
-2. **Idempotency.** Migration must be safe to re-run. Tag migrated rows (e.g. a
-   `reference` value of `MIGRATED-B-<id>`) and skip any already present.
-3. **Back up before writing.** `mysqldump` of `branch_expenses` and `expenses`.
-4. Migrate, then re-count both tables and confirm the totals match.
-5. **Only then** repoint P&L and delete System B.
-
-Do not delete `branch_expenses` in the same step as the migration. Leave the table
-in place for at least one reporting cycle so the old numbers can be checked.
+**Phase 1 is one sitting** and delivers the entire correctness benefit. Do it as a
+single commit so P&L and the expense source change together.
 
 ---
 
-## 5. Known gap this creates
+## Risks
 
-System B lets an admin post an expense to **any** branch via a `branch_id` parameter.
-System A derives the branch from `scopeBranch`, and for an admin that comes from the
-`X-Branch-Id` header. With no branch selected, `scopedBranchId` is `null` and both
-`GET /expenses` and `POST /expenses` return **`400 Branch required`**
-(`backend/routes/expenses.js:28` and `:87`).
+**Low, and this is unusual — take advantage of it.** Both expense tables and the orders
+table are empty, so Phase 1 cannot corrupt or lose anything. The same change against a
+populated database would need backups, a dry run, and a reporting cycle of overlap.
+Doing it now costs almost nothing.
 
-So after retiring System B, an admin must select a branch before recording or viewing
-expenses. Two options:
+**P&L will show zeros until trading resumes.** Revenue comes from `orders`, which is
+also empty. Zero profit after Phase 1 is correct, not a bug.
 
-- **(a) Accept it.** Admins already use a branch selector; this is consistent with the
-  rest of the app. No code change.
-- **(b) Allow an explicit `branch_id` override for admins** on `/api/expenses`, so an
-  admin can record for any branch without switching context. Small change, keeps
-  parity with what System B could do.
-
-**Recommendation: (b)** — it preserves an ability that exists today, and losing it
-would be a regression rather than a simplification.
+**One naming issue to fix while here.** The report calls its result `gross_profit`, but
+it subtracts operating expenses from revenue — closer to *net* or operating profit.
+Gross profit conventionally means revenue minus cost of goods sold. Worth renaming
+before the figure is shown to an accountant.
 
 ---
 
-## 6. Steps
+## Open question
 
-1. **Inspect production.** Row counts and totals in both tables, per branch. Read-only.
-   This decides whether the migration is trivial or needs care.
-2. **Back up** both tables.
-3. **Write the migration** as a script with a `--dry-run` default, printing per-branch
-   counts and totals. Run dry, review, then run for real.
-4. **Repoint P&L** — `branches.js:403`, `FROM branch_expenses` → `FROM expenses`.
-   Same columns, so it is a one-word change.
-5. **Verify P&L** against a known branch and date range: the new figure should equal
-   old `branch_expenses` total + existing `expenses` total.
-6. **Admin branch override** per §5(b).
-7. **Remove System B**: three routes in `branches.js`, `ExpensesPanel` and its toggle
-   in `Branches.js`.
-8. **Drop the boot patch** in `server.js:648`. Leave the table itself until a
-   reporting cycle has passed, then drop separately.
-
-Steps 1–5 deliver the whole benefit. 6–8 are cleanup and can follow later.
-
----
-
-## 7. Open questions
-
-1. **Is there real data in both tables on production?** Determines whether this is a
-   merge or a straight cutover. Needs a read-only count first.
-2. **Should managers see P&L?** It is admin-only today. A manager who can record
-   expenses arguably ought to see their own branch's profit — but not other branches'.
-   Out of scope unless decided otherwise.
-3. **"Gross profit" is mislabelled.** The report subtracts operating expenses from
-   revenue, which is nearer *net* profit; gross profit conventionally means revenue
-   minus cost of goods sold. Worth renaming while touching this code, since the figure
-   may be shown to an accountant.
-
----
-
-## 8. Risk
-
-**P&L numbers will drop when this lands.** That is the fix working — expenses that
-were being ignored start counting. Anyone reading those reports should be told before
-it deploys, or a sudden fall in reported profit will look like a new bug.
-
-**Financial records are involved.** Every write step needs a backup first and a dry run
-before it.
+**Should managers see P&L for expenses only, or full revenue too?** Currently they see
+the whole report for their branch — revenue, expenses, profit, margin. That matches
+"a manager runs the branch like its owner". Flagged only so it is a deliberate choice
+rather than an accident.
