@@ -226,7 +226,7 @@ export default function Branches() {
         </div>
       )}
 
-      {showPL       && <PLPanel api={api} branches={branches} />}
+      {showPL       && <PLPanel api={api} branches={branches} isAdmin={isAdmin} />}
       {showExpenses && <ExpensesPanel api={api} branches={branches} />}
       {showTransfers && <TransfersPanel api={api} branches={branches} />}
 
@@ -464,7 +464,7 @@ function ExpensesPanel({ api, branches }) {
   );
 }
 
-function PLPanel({ api, branches }) {
+function PLPanel({ api, branches, isAdmin }) {
   const today = new Date().toISOString().split('T')[0];
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(firstOfMonth);
@@ -485,12 +485,22 @@ function PLPanel({ api, branches }) {
     <div className="card p-5 space-y-4">
       <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ChartBarIcon className="h-4 w-4 text-sky-500" /> Profit & Loss Report</h3>
       <div className="flex flex-wrap gap-2 items-end">
-        <div><label className="label text-xs">Branch</label>
-          <select className="select text-sm w-44" value={branchId} onChange={e=>setBranchId(e.target.value)}>
-            <option value="">All Branches</option>
-            {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </div>
+        {/* A manager only ever gets their own branch — the server takes it from the
+            account and ignores branch_id — so offering a picker would mislead. */}
+        {isAdmin ? (
+          <div><label className="label text-xs">Branch</label>
+            <select className="select text-sm w-44" value={branchId} onChange={e=>setBranchId(e.target.value)}>
+              <option value="">All Branches</option>
+              {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div><label className="label text-xs">Branch</label>
+            <div className="select text-sm w-44 bg-slate-50 text-slate-600 flex items-center">
+              {branches[0]?.name || 'My branch'}
+            </div>
+          </div>
+        )}
         <div><label className="label text-xs">From</label><input type="date" className="input text-sm" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} /></div>
         <div><label className="label text-xs">To</label><input type="date" className="input text-sm" value={dateTo} onChange={e=>setDateTo(e.target.value)} /></div>
       </div>

@@ -1624,6 +1624,8 @@ function ItemsSoldByCategory({ api }) {
 // ─── Report Registry ─────────────────────────────────────────────
 // ─── Branch P&L Report ───────────────────────────────────────────
 function BranchPLReport({ api }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const today = new Date().toISOString().split('T')[0];
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(firstOfMonth);
@@ -1644,10 +1646,17 @@ function BranchPLReport({ api }) {
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 items-end">
         <div><label className="text-xs font-semibold text-gray-500 block mb-1">Branch</label>
-          <select value={branchId} onChange={e=>setBranchId(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
-            <option value="">All Branches</option>
-            {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+          {/* Managers are pinned to their own branch server-side, so no picker. */}
+          {isAdmin ? (
+            <select value={branchId} onChange={e=>setBranchId(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              <option value="">All Branches</option>
+              {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          ) : (
+            <div className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600">
+              {branches[0]?.name || 'My branch'}
+            </div>
+          )}
         </div>
         <div><label className="text-xs font-semibold text-gray-500 block mb-1">From</label><input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
         <div><label className="text-xs font-semibold text-gray-500 block mb-1">To</label><input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>

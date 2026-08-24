@@ -368,24 +368,33 @@ router.delete('/expenses/:id', authenticateToken, requireRole(['admin']), async 
 
 // ── P&L report ────────────────────────────────────────────────────────────────
 
-router.get('/pl-report', authenticateToken, requireRole(['admin']), async (req, res) => {
+router.get('/pl-report', authenticateToken, requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { branch_id, date_from, date_to } = req.query;
     const values = [];
     let branchWhere = '';
     let expenseBranchWhere = '1=1';
 
-    if (branch_id) {
+    // A manager runs their own branch and sees its P&L — but only its own. Their
+    // branch is taken from the account, never from the query string, so passing
+    // another branch_id cannot widen what they see. Mirrors /all/stats.
+    const isManager = req.user.role === 'manager';
+    if (isManager && !req.user.branch_id) {
+      return res.status(403).json({ error: 'No branch assigned to this manager' });
+    }
+    const effectiveBranchId = isManager ? req.user.branch_id : branch_id;
+
+    if (effectiveBranchId) {
       branchWhere = 'AND o.branch_id = ?';
       expenseBranchWhere = 'be.branch_id = ?';
-      values.push(branch_id);
+      values.push(effectiveBranchId);
     }
 
     const dateFrom = date_from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
     const dateTo = date_to || new Date().toISOString().split('T')[0];
 
-    const branches = branch_id
-      ? await query('SELECT * FROM branches WHERE id = ?', [branch_id])
+    const branches = effectiveBranchId
+      ? await query('SELECT * FROM branches WHERE id = ?', [effectiveBranchId])
       : await query('SELECT * FROM branches WHERE is_active = 1 ORDER BY id');
 
     const results = await Promise.all(branches.map(async (b) => {
