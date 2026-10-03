@@ -6,6 +6,19 @@ const { logManualAudit } = require('../middleware/audit');
 
 const router = express.Router();
 
+// Kitchen actions may move an order's status only while the order is still open.
+// Printing the bill sets 'done', often before the kitchen has marked every item, and
+// an unconditional write here used to flip paid orders back to 'ready' — which drops
+// them out of every sales report. Hold orders are left alone too.
+const OPEN_ORDER_STATUSES = ['pending', 'preparing', 'ready'];
+const advanceOpenOrder = async (orderId, status) => {
+  const result = await query(
+    'UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ? AND status IN (?)',
+    [status, orderId, OPEN_ORDER_STATUSES]
+  );
+  return result.affectedRows > 0;
+};
+
 // Get kitchen queue with advanced filtering and priority sorting
 router.get('/', scopeBranch, async (req, res) => {
   try {
@@ -208,10 +221,7 @@ router.patch('/:id/start', validateId, async (req, res) => {
     );
     
     if (orderItemsResult[0].pending_count === 0) {
-      await update('orders', {
-        status: 'preparing',
-        updated_at: new Date()
-      }, { id: queueItem.order_id });
+      await advanceOpenOrder(queueItem.order_id, 'preparing');
     }
     
     // Get updated item
@@ -297,13 +307,8 @@ router.patch('/:id/ready', validateId, async (req, res) => {
       [queueItem.order_id]
     );
     
-    if (orderItemsResult[0].not_ready_count === 0) {
-      await update('orders', {
-        status: 'ready',
-        updated_at: now
-      }, { id: queueItem.order_id });
-      
-      // Emit order ready notification
+    // Announce only a real change — an already-billed order isn't newly "ready".
+    if (orderItemsResult[0].not_ready_count === 0 && await advanceOpenOrder(queueItem.order_id, 'ready')) {
       const io = req.app.get('io');
       io.emit('order-ready', {
         orderId: queueItem.order_id,
@@ -390,22 +395,25 @@ router.patch('/:id/cancel', validateId, async (req, res) => {
       updated_at: new Date()
     }, { id: queueItem.order_item_id });
     
-    // Check if all items in order are cancelled
-    const orderItemsResult = await query(
-      'SELECT COUNT(*) as active_count FROM order_items WHERE order_id = ? AND status NOT IN ("cancelled", "ready")',
+    // The order is cancelled only when every item is. If some items were already
+    // served and nothing is left in progress, the order is ready, not cancelled.
+    const [counts] = await query(
+      `SELECT SUM(status <> 'cancelled') AS remaining,
+              SUM(status IN ('pending', 'preparing')) AS in_progress
+       FROM order_items WHERE order_id = ?`,
       [queueItem.order_id]
     );
-    
-    if (orderItemsResult[0].active_count === 0) {
-      await update('orders', {
-        status: 'cancelled',
-        updated_at: new Date()
-      }, { id: queueItem.order_id });
-      
+    const remaining = Number(counts?.remaining) || 0;
+    const inProgress = Number(counts?.in_progress) || 0;
+
+    if (remaining === 0) {
+      const cancelled = await advanceOpenOrder(queueItem.order_id, 'cancelled');
       // Free up table if dine-in
-      if (order.order_type === 'dine_in' && order.table_id) {
+      if (cancelled && order.order_type === 'dine_in' && order.table_id) {
         await update('tables', { status: 'available' }, { id: order.table_id });
       }
+    } else if (inProgress === 0) {
+      await advanceOpenOrder(queueItem.order_id, 'ready');
     }
     
     // Emit real-time updates
