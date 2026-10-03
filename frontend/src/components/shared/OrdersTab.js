@@ -4,6 +4,7 @@ import { ClockIcon, LockClosedIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
 import { BackdatedBadge, orderTimeLabel } from '../Orders/BackdateNote';
+import OrdersByDay from '../Orders/OrdersByDay';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -21,20 +22,26 @@ const TYPE_BORDER = {
 };
 
 export default function OrdersTab() {
-  const { api, selectedBranch } = useAuth();
+  const { api, user, selectedBranch } = useAuth();
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
   const [search, setSearch] = useState('');
 
+  // Admins and managers see the list split by business day; waiters keep one list.
+  const splitView = user?.role === 'admin' || user?.role === 'manager';
+  const listParams = {
+    status: filterStatus || undefined,
+    order_type: filterType || undefined,
+    branch_id: selectedBranch?.id,
+  };
+
   const { data, isLoading } = useQuery(
     ['shared-orders-tab', filterStatus, filterType, selectedBranch?.id],
-    () => api.get('/orders', {
-      params: { status: filterStatus || undefined, order_type: filterType || undefined, limit: 100, branch_id: selectedBranch?.id }
-    }).then(r => r.data),
-    { refetchInterval: 30000 }
+    () => api.get('/orders', { params: { ...listParams, limit: 100 } }).then(r => r.data),
+    { refetchInterval: 30000, enabled: !splitView }
   );
 
-  const orders = (data?.orders || []).filter(o => {
+  const matchesSearch = (o) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
@@ -43,7 +50,48 @@ export default function OrdersTab() {
       o.customer_name?.toLowerCase().includes(q) ||
       o.waiter_full_name?.toLowerCase().includes(q)
     );
-  });
+  };
+  const orders = (data?.orders || []).filter(matchesSearch);
+
+  const renderOrderRow = (order) => (
+    <div key={order.id}
+      className={`card p-4 border-l-4 ${order.status === 'hold' ? 'border-l-orange-400 bg-orange-50/20' : (TYPE_BORDER[order.order_type] || 'border-l-slate-200')}`}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
+            {TYPE_LABELS[order.order_type]}
+          </span>
+          {order.table_number && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
+              Table {order.table_number}
+            </span>
+          )}
+          <span className="flex items-center gap-1 text-xs text-slate-400">
+            <ClockIcon className="h-3 w-3" />
+            {orderTimeLabel(order)}
+          </span>
+          <BackdatedBadge order={order} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+            {order.status === 'hold' ? '⏸ Hold' : order.status}
+          </span>
+          <span className="font-black text-slate-800">৳{parseFloat(order.total_amount || 0).toFixed(0)}</span>
+          {/* !! — bill_printed comes back as 0/1, and a bare 0 would render as "0" */}
+          {!!order.bill_printed && (
+            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+              <LockClosedIcon className="h-3 w-3" /> Printed
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="text-xs text-slate-400 mt-1 flex items-center gap-3">
+        <span>by {order.waiter_full_name}</span>
+        {order.customer_name && <span className="text-slate-500">{order.customer_name}</span>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-3">
@@ -70,51 +118,16 @@ export default function OrdersTab() {
         </select>
       </div>
 
-      {isLoading ? (
+      {splitView ? (
+        <OrdersByDay params={listParams} renderOrder={renderOrderRow} matches={matchesSearch} refetchInterval={30000} />
+      ) : isLoading ? (
         <div className="flex justify-center py-10"><LoadingSpinner /></div>
       ) : orders.length === 0 ? (
         <div className="card p-10 text-center text-slate-400 text-sm">No orders found</div>
       ) : (
         <div className="space-y-2">
           <p className="text-xs text-slate-400 font-semibold">{orders.length} orders</p>
-          {orders.map(order => (
-            <div key={order.id}
-              className={`card p-4 border-l-4 ${order.status === 'hold' ? 'border-l-orange-400 bg-orange-50/20' : (TYPE_BORDER[order.order_type] || 'border-l-slate-200')}`}>
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
-                    {TYPE_LABELS[order.order_type]}
-                  </span>
-                  {order.table_number && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
-                      Table {order.table_number}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-1 text-xs text-slate-400">
-                    <ClockIcon className="h-3 w-3" />
-                    {orderTimeLabel(order)}
-                  </span>
-                  <BackdatedBadge order={order} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
-                    {order.status === 'hold' ? '⏸ Hold' : order.status}
-                  </span>
-                  <span className="font-black text-slate-800">৳{parseFloat(order.total_amount || 0).toFixed(0)}</span>
-                  {order.bill_printed && (
-                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                      <LockClosedIcon className="h-3 w-3" /> Printed
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="text-xs text-slate-400 mt-1 flex items-center gap-3">
-                <span>by {order.waiter_full_name}</span>
-                {order.customer_name && <span className="text-slate-500">{order.customer_name}</span>}
-              </div>
-            </div>
-          ))}
+          {orders.map(renderOrderRow)}
         </div>
       )}
     </div>

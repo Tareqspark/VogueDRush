@@ -157,67 +157,83 @@ const calculateOrderTotals = async (items, orderType, connection, branchId, back
 };
 
 // Get all orders with filtering and pagination
+// Business days run 06:00–06:00 Dhaka time. On this UTC server that is exactly the
+// MySQL date, so CURDATE() and DATE(created_at) here match every report's "today".
+const OPEN_STATUSES_SQL = "('pending', 'preparing', 'ready', 'hold')";
+const isDay = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+// The list filters shared by GET / and GET /days, so a day's summary always
+// counts the same orders that opening that day lists.
+const orderListFilters = (req) => {
+  const { status, order_type, waiter_id, start_date, end_date, table_id, branch_id, backdated } = req.query;
+  let whereClause = '1=1';
+  const values = [];
+
+  // scopedBranchId wins over query param — staff always locked to their branch
+  const effectiveBranch = req.scopedBranchId ?? (branch_id ? parseInt(branch_id) : null);
+  if (effectiveBranch) {
+    whereClause += ' AND o.branch_id = ?';
+    values.push(effectiveBranch);
+  }
+
+  if (status) {
+    whereClause += ' AND o.status = ?';
+    values.push(status);
+  }
+
+  if (order_type) {
+    whereClause += ' AND o.order_type = ?';
+    values.push(order_type);
+  }
+
+  if (waiter_id) {
+    whereClause += ' AND o.waiter_id = ?';
+    values.push(waiter_id);
+  }
+
+  if (table_id) {
+    whereClause += ' AND o.table_id = ?';
+    values.push(table_id);
+  }
+
+  if (backdated === 'true' || backdated === '1') {
+    whereClause += ' AND o.is_backdated = 1';
+  }
+
+  if (start_date) {
+    whereClause += ' AND DATE(o.created_at) >= ?';
+    values.push(start_date);
+  }
+
+  if (end_date) {
+    whereClause += ' AND DATE(o.created_at) <= ?';
+    values.push(end_date);
+  }
+
+  return { whereClause, values };
+};
+
 router.get('/', scopeBranch, async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 50,
-      status,
-      order_type,
-      waiter_id,
-      start_date,
-      end_date,
-      table_id,
-      branch_id,
-      backdated,
-    } = req.query;
+    const { page = 1, limit = 50, scope, day } = req.query;
 
     const limitInt = Math.min(parseInt(limit) || 50, 200);
     const offsetInt = (parseInt(page) - 1) * limitInt;
-    let whereClause = '1=1';
-    let values = [];
+    let { whereClause, values } = orderListFilters(req);
 
-    // scopedBranchId wins over query param — staff always locked to their branch
-    const effectiveBranch = req.scopedBranchId ?? (branch_id ? parseInt(branch_id) : null);
-    if (effectiveBranch) {
-      whereClause += ' AND o.branch_id = ?';
-      values.push(effectiveBranch);
+    // scope=today: the current business day. scope=open_earlier: anything from an
+    // earlier day still not done or cancelled. day=YYYY-MM-DD: one business day.
+    if (scope === 'today') {
+      whereClause += ' AND o.created_at >= CURDATE()';
+    } else if (scope === 'open_earlier') {
+      whereClause += ` AND o.created_at < CURDATE() AND o.status IN ${OPEN_STATUSES_SQL}`;
     }
-
-    if (status) {
-      whereClause += ' AND o.status = ?';
-      values.push(status);
-    }
-    
-    if (order_type) {
-      whereClause += ' AND o.order_type = ?';
-      values.push(order_type);
-    }
-    
-    if (waiter_id) {
-      whereClause += ' AND o.waiter_id = ?';
-      values.push(waiter_id);
-    }
-    
-    if (table_id) {
-      whereClause += ' AND o.table_id = ?';
-      values.push(table_id);
+    if (day !== undefined) {
+      if (!isDay(day)) return res.status(400).json({ error: 'day must be YYYY-MM-DD' });
+      whereClause += ' AND o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+      values.push(day, day);
     }
 
-    if (backdated === 'true' || backdated === '1') {
-      whereClause += ' AND o.is_backdated = 1';
-    }
-
-    if (start_date) {
-      whereClause += ' AND DATE(o.created_at) >= ?';
-      values.push(start_date);
-    }
-    
-    if (end_date) {
-      whereClause += ' AND DATE(o.created_at) <= ?';
-      values.push(end_date);
-    }
-    
     // Get orders with joins
     const ordersQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
@@ -250,8 +266,15 @@ router.get('/', scopeBranch, async (req, res) => {
     const countResult = await query(countQuery, values);
     const total = countResult[0].total;
     
+    // The server's business date, so "Today" never depends on a terminal's clock.
+    let businessDay;
+    if (scope === 'today') {
+      [{ today: businessDay }] = await query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
+    }
+
     res.json({
       orders,
+      business_day: businessDay,
       pagination: {
         page: parseInt(page),
         limit: limitInt,
@@ -381,6 +404,51 @@ router.get('/transactions/report', requireRole(['admin', 'manager']), scopeBranc
 });
 
 // Get all hold orders (pay-later)
+// Per-day order counts and completed sales for the "Previous days" list, newest
+// first, in pages of `limit` days before `before` (default: today). Takes the same
+// filters as GET /. Must stay above GET /:id, which would otherwise claim '/days'.
+router.get('/days', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
+  try {
+    const { before, limit = 14 } = req.query;
+    if (before !== undefined && !isDay(before)) return res.status(400).json({ error: 'before must be YYYY-MM-DD' });
+    const limitInt = Math.min(parseInt(limit) || 14, 60);
+
+    let { whereClause, values } = orderListFilters(req);
+    if (before) {
+      whereClause += ' AND o.created_at < ?';
+      values.push(before);
+    } else {
+      whereClause += ' AND o.created_at < CURDATE()';
+    }
+
+    const rows = await query(
+      `SELECT DATE_FORMAT(o.created_at, '%Y-%m-%d') AS day,
+              COUNT(*) AS orders,
+              SUM(o.status IN ${OPEN_STATUSES_SQL}) AS open_orders,
+              COALESCE(SUM(CASE WHEN o.status = 'done' THEN o.total_amount END), 0) AS sales
+       FROM orders o
+       WHERE ${whereClause}
+       GROUP BY day
+       ORDER BY day DESC
+       LIMIT ?`,
+      [...values, limitInt]
+    );
+
+    res.json({
+      days: rows.map(r => ({
+        day: r.day,
+        orders: Number(r.orders),
+        open_orders: Number(r.open_orders) || 0,
+        sales: parseFloat(r.sales) || 0,
+      })),
+      has_more: rows.length === limitInt,
+    });
+  } catch (error) {
+    console.error('Get order days error:', error);
+    res.status(500).json({ error: 'Failed to fetch order days' });
+  }
+});
+
 router.get('/hold', scopeBranch, async (req, res) => {
   try {
     const { page = 1, limit = 100 } = req.query;

@@ -14,6 +14,7 @@ import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
 import BackdateOrderModal from '../components/Orders/BackdateOrderModal';
 import { BackdatedBadge, BackdateNote, orderTimeLabel } from '../components/Orders/BackdateNote';
+import OrdersByDay from '../components/Orders/OrdersByDay';
 import OrdersTab from '../components/shared/OrdersTab';
 import KitchenTab from '../components/shared/KitchenTab';
 import { printReceipt } from '../utils/receipt';
@@ -57,11 +58,21 @@ export default function Orders() {
   const [tab, setTab] = useState('overview');
   const [showBackdate, setShowBackdate] = useState(false);
 
+  // Admins and managers see the list split by business day (OrdersByDay); waiters
+  // keep the single recent-orders list.
+  const splitView = user?.role === 'admin' || user?.role === 'manager';
+  const listParams = {
+    status: filterStatus || undefined,
+    order_type: filterType || undefined,
+    backdated: filterBackdated || undefined,
+    branch_id: selectedBranch?.id,
+  };
+
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
     ['orders', filterStatus, filterType, filterBackdated, selectedBranch?.id],
-    () => api.get('/orders', { params: { status: filterStatus || undefined, order_type: filterType || undefined, backdated: filterBackdated || undefined, limit: 100, branch_id: selectedBranch?.id } }).then(r => r.data),
-    { refetchInterval: 15000 }
+    () => api.get('/orders', { params: { ...listParams, limit: 100 } }).then(r => r.data),
+    { refetchInterval: 15000, enabled: !splitView }
   );
 
   const { data: orderDetail } = useQuery(
@@ -96,6 +107,47 @@ export default function Orders() {
 
   const orders = ordersData?.orders || [];
 
+  const renderOrderCard = (order) => (
+    <div key={order.id}
+      onClick={() => setSelectedOrder(order.id)}
+      className={`card p-4 cursor-pointer hover:shadow-card-hover transition-all group border-l-4 ${order.status === 'hold' ? 'border-l-orange-400 bg-orange-50/20' : (TYPE_CARD_STYLES[order.order_type] || 'border-l-slate-200')}`}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
+            {TYPE_LABELS[order.order_type]}
+          </span>
+          {order.table_number && (
+            <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
+              Table {order.table_number}
+            </span>
+          )}
+          <span className="flex items-center gap-1 text-xs text-slate-400">
+            <ClockIcon className="h-3 w-3" />
+            {orderTimeLabel(order)}
+          </span>
+          <BackdatedBadge order={order} />
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
+            {order.status === 'hold' ? '⏸ Hold' : order.status}
+          </span>
+          <span className="font-black text-slate-800 text-base">৳{parseFloat(order.total_amount).toFixed(0)}</span>
+          {/* !! — bill_printed comes back as 0/1, and a bare 0 would render as "0" */}
+          {!!order.bill_printed && (
+            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
+              <LockClosedIcon className="h-3 w-3" /> Printed
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="text-xs text-slate-400 mt-1.5 flex items-center gap-3">
+        <span>by {order.waiter_full_name}</span>
+        {order.customer_name && <span className="font-medium text-slate-500">{order.customer_name}{order.customer_phone ? ` · ${order.customer_phone}` : ''}</span>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
@@ -104,7 +156,9 @@ export default function Orders() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-slate-800">Orders</h1>
-          <p className="text-slate-500 text-sm">{orders.length} orders found</p>
+          <p className="text-slate-500 text-sm">
+            {splitView ? 'Today first, earlier days below' : `${orders.length} orders found`}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setShowSearch(true)} className="btn btn-secondary">
@@ -146,7 +200,9 @@ export default function Orders() {
       </div>
 
       {/* Orders list */}
-      {isLoading ? (
+      {splitView ? (
+        <OrdersByDay params={listParams} renderOrder={renderOrderCard} />
+      ) : isLoading ? (
         <div className="flex justify-center py-16"><LoadingSpinner size="lg" /></div>
       ) : orders.length === 0 ? (
         <div className="card p-16 text-center">
@@ -155,45 +211,7 @@ export default function Orders() {
         </div>
       ) : (
         <div className="space-y-2">
-          {orders.map(order => (
-            <div key={order.id}
-              onClick={() => setSelectedOrder(order.id)}
-              className={`card p-4 cursor-pointer hover:shadow-card-hover transition-all group border-l-4 ${order.status === 'hold' ? 'border-l-orange-400 bg-orange-50/20' : (TYPE_CARD_STYLES[order.order_type] || 'border-l-slate-200')}`}>
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono font-black text-sky-600 text-sm">{order.order_number}</span>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
-                    {TYPE_LABELS[order.order_type]}
-                  </span>
-                  {order.table_number && (
-                    <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
-                      Table {order.table_number}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-1 text-xs text-slate-400">
-                    <ClockIcon className="h-3 w-3" />
-                    {orderTimeLabel(order)}
-                  </span>
-                  <BackdatedBadge order={order} />
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
-                    {order.status === 'hold' ? '⏸ Hold' : order.status}
-                  </span>
-                  <span className="font-black text-slate-800 text-base">৳{parseFloat(order.total_amount).toFixed(0)}</span>
-                  {order.bill_printed && (
-                    <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
-                      <LockClosedIcon className="h-3 w-3" /> Printed
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="text-xs text-slate-400 mt-1.5 flex items-center gap-3">
-                <span>by {order.waiter_full_name}</span>
-                {order.customer_name && <span className="font-medium text-slate-500">{order.customer_name}{order.customer_phone ? ` · ${order.customer_phone}` : ''}</span>}
-              </div>
-            </div>
-          ))}
+          {orders.map(renderOrderCard)}
         </div>
       )}
 

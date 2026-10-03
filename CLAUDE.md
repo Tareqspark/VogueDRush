@@ -85,6 +85,10 @@ The table and every item must belong to that branch.
 
 Every path that writes `order_items` prices through `priceItem`: branch override, then promotional price, then list price. That's the same rule as the menu's `effective_price`. The client copy of the rule is `frontend/src/utils/price.js`.
 
+**Business day = 06:00–06:00 Dhaka time.** On the UTC server that's exactly the MySQL date, so "today" is `CURDATE()` / `DATE(created_at)` in every report. For admins and managers, `OrdersByDay` (`components/Orders/OrdersByDay.js`) splits the order list into Today, Still open from earlier days, and Previous days. It's built on `GET /orders?scope=today|open_earlier`, `GET /orders?day=YYYY-MM-DD` and `GET /orders/days`.
+
+Kitchen actions only change an order's status while it is pending, preparing or ready (`advanceOpenOrder` in `kitchen.js`). Never write an order's status unconditionally: billing sets `done` before the kitchen finishes, and most sales reports count only `done`.
+
 `POST /orders/backdate` records a past sale in one transaction, including stock deduction. The order is flagged `is_backdated` and stores `backdate_reason` and `backdated_by`. `created_at` holds the sale time (which reports key on); `backdate_entered_at` holds when it was typed in. `waiter_id` is whoever served. Managers are limited by the `backdate_manager_max_days` setting. It retries up to 3 times on an `order_number` collision. The order status enum is `pending, preparing, ready, done, cancelled, hold`. When an order is billed (`POST /:id/bill`) or fully paid (`POST /:id/payments`), `deductRecipeStock` runs in the background without blocking the response. It writes BOM deductions to `ingredients` and `stock_ledger`.
 
 ### Sockets
