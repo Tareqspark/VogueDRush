@@ -10,35 +10,36 @@ const router = express.Router();
 
 // Phase 3: Auto-deduct ingredient stock based on BOM recipes when an order is billed.
 // Non-blocking — if this fails the bill still succeeds; error is logged.
-async function deductRecipeStock(orderId, branchId, userId) {
-  const items = await query(
+// `run` lets a backdated entry deduct inside its own transaction (see runner below).
+async function deductRecipeStock(orderId, branchId, userId, run = query, note = 'Auto-deducted from sale') {
+  const items = await run(
     "SELECT oi.food_item_id, oi.quantity FROM order_items oi WHERE oi.order_id = ? AND oi.status != 'cancelled'",
     [orderId]
   );
   for (const item of items) {
-    const lines = await query(
+    const lines = await run(
       'SELECT r.ingredient_id, r.qty_per_portion FROM recipes r WHERE r.branch_id = ? AND r.food_item_id = ?',
       [branchId, item.food_item_id]
     );
     for (const line of lines) {
       const deductQty = parseFloat(line.qty_per_portion) * parseInt(item.quantity);
-      await query(
+      await run(
         'UPDATE ingredients SET current_stock = GREATEST(0, current_stock - ?), updated_at = NOW() WHERE id = ? AND branch_id = ?',
         [deductQty, line.ingredient_id, branchId]
       );
-      const [ing] = await query('SELECT current_stock, cost_price FROM ingredients WHERE id = ?', [line.ingredient_id]);
-      await query(
+      const [ing] = await run('SELECT current_stock, cost_price FROM ingredients WHERE id = ?', [line.ingredient_id]);
+      await run(
         `INSERT INTO stock_ledger (branch_id, ingredient_id, movement_type, qty, balance_after, unit_cost, reference_type, reference_id, notes, created_by)
-         VALUES (?, ?, 'sale_deduction', ?, ?, ?, 'order', ?, 'Auto-deducted from sale', ?)`,
-        [branchId, line.ingredient_id, -deductQty, ing?.current_stock ?? 0, ing?.cost_price || 0, orderId, userId || null]
+         VALUES (?, ?, 'sale_deduction', ?, ?, ?, 'order', ?, ?, ?)`,
+        [branchId, line.ingredient_id, -deductQty, ing?.current_stock ?? 0, ing?.cost_price || 0, orderId, note, userId || null]
       );
     }
   }
 }
 
-// Generate unique order number — 4-digit random reduces birthday-paradox collision risk
-const generateOrderNumber = () => {
-  const date = new Date();
+// Generate unique order number — 4-digit random reduces birthday-paradox collision risk.
+// Backdated entries pass the sale date so the number carries that day, not today.
+const generateOrderNumber = (date = new Date()) => {
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
@@ -51,12 +52,16 @@ const generateOrderNumber = () => {
 const runner = (connection) => async (sql, params) =>
   connection ? (await connection.query(sql, params))[0] : query(sql, params);
 
+// An error caused by the request (answered with 400), as opposed to a server fault.
+const clientError = (message) => Object.assign(new Error(message), { status: 400 });
+
 // Prices one item for one branch, with the rule the menu shows (GET /menu/items):
 // branch override, then promotional price, then list price. Every path that writes
 // order_items must price through here, so line totals add up to the order subtotal —
 // PUT /:id/items recomputes the subtotal from those lines.
-// Throws unless the item is available and on this branch's menu.
-const priceItem = async (run, foodItemId, branchId) => {
+// Throws unless the item is on this branch's menu and, unless `requireAvailable` is
+// false, available right now.
+const priceItem = async (run, foodItemId, branchId, { requireAvailable = true } = {}) => {
   const rows = await run(
     `SELECT fi.*, COALESCE(bip.price, fi.promotional_price, fi.price) AS unit_price
      FROM food_items fi
@@ -65,13 +70,30 @@ const priceItem = async (run, foodItemId, branchId) => {
     [branchId, foodItemId]
   );
   const foodItem = rows[0];
-  if (!foodItem || !foodItem.is_available) {
-    throw new Error(`Food item ${foodItemId} not available`);
+  if (!foodItem || (requireAvailable && !foodItem.is_available)) {
+    throw clientError(`Food item ${foodItemId} not available`);
   }
   if (foodItem.branch_id !== branchId) {
-    throw new Error(`Food item ${foodItemId} is not on this branch's menu`);
+    throw clientError(`Food item ${foodItemId} is not on this branch's menu`);
   }
   return { foodItem, unitPrice: parseFloat(foodItem.unit_price) };
+};
+
+// VAT %, service charge % and delivery fee from system_settings.
+// ?? not || — a configured "0" must survive. (Raw strings here so "0" is truthy,
+// but an empty setting would otherwise silently become the default.)
+const loadChargeSettings = async (run) => {
+  const rows = await run(
+    "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('vat_percentage', 'service_charge_percentage', 'delivery_fee')",
+    []
+  );
+  const settings = {};
+  rows.forEach(s => { settings[s.setting_key] = s.setting_value; });
+  return {
+    vatPercentage: parseFloat(settings.vat_percentage ?? 15) || 0,
+    serviceChargePercentage: parseFloat(settings.service_charge_percentage ?? 10) || 0,
+    deliveryFee: parseFloat(settings.delivery_fee ?? 0) || 0,
+  };
 };
 
 // The branch a new order is booked to. Non-admins always book to their own branch,
@@ -97,30 +119,27 @@ const branchRequiredError = (req) => req.user.role === 'admin'
 // C-2 fix: accept an optional `connection` so this can run inside a SERIALIZABLE transaction
 //          using the same connection, avoiding TOCTOU price races.
 // M-2 fix: use global `vat_percentage` from system_settings so the Settings page is effective.
-const calculateOrderTotals = async (items, orderType, connection, branchId) => {
+// `backdate` is for backdated entries, which record what was charged on the day: a
+// line's unit_price and the backdate's vat_percentage / service_charge_percentage
+// override today's values, and items unavailable today are still allowed.
+const calculateOrderTotals = async (items, orderType, connection, branchId, backdate = null) => {
   let subtotal = 0;
   const dbQuery = runner(connection);
   const lines = [];
 
   for (const item of items) {
-    const line = await priceItem(dbQuery, item.food_item_id, branchId);
+    const line = await priceItem(dbQuery, item.food_item_id, branchId, { requireAvailable: !backdate });
+    if (backdate && item.unit_price != null) line.unitPrice = parseFloat(item.unit_price);
     lines.push(line);
     subtotal += line.unitPrice * item.quantity;
   }
 
   // Fetch relevant settings via the same connection
-  const settingsRows = await dbQuery(
-    "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('vat_percentage', 'service_charge_percentage', 'delivery_fee')",
-    []
-  );
-  const settingsMap = {};
-  settingsRows.forEach(s => { settingsMap[s.setting_key] = s.setting_value; });
-
-  // ?? not || — a configured "0" must survive. (Raw strings here so "0" is truthy,
-  // but an empty setting would otherwise silently become the default.)
-  const vatPercentage = parseFloat(settingsMap.vat_percentage ?? 15) || 0;
-  const serviceChargePercentage = orderType === 'dine_in' ? (parseFloat(settingsMap.service_charge_percentage ?? 10) || 0) : 0;
-  const deliveryFee = orderType === 'delivery' ? (parseFloat(settingsMap.delivery_fee ?? 0) || 0) : 0;
+  const charges = await loadChargeSettings(dbQuery);
+  const vatPercentage = backdate?.vat_percentage ?? charges.vatPercentage;
+  const serviceChargePercentage = orderType === 'dine_in'
+    ? (backdate?.service_charge_percentage ?? charges.serviceChargePercentage) : 0;
+  const deliveryFee = orderType === 'delivery' ? charges.deliveryFee : 0;
 
   const vatAmount = (subtotal * vatPercentage) / 100;
   const serviceCharge = (subtotal * serviceChargePercentage) / 100;
@@ -150,6 +169,7 @@ router.get('/', scopeBranch, async (req, res) => {
       end_date,
       table_id,
       branch_id,
+      backdated,
     } = req.query;
 
     const limitInt = Math.min(parseInt(limit) || 50, 200);
@@ -183,7 +203,11 @@ router.get('/', scopeBranch, async (req, res) => {
       whereClause += ' AND o.table_id = ?';
       values.push(table_id);
     }
-    
+
+    if (backdated === 'true' || backdated === '1') {
+      whereClause += ' AND o.is_backdated = 1';
+    }
+
     if (start_date) {
       whereClause += ' AND DATE(o.created_at) >= ?';
       values.push(start_date);
@@ -197,6 +221,7 @@ router.get('/', scopeBranch, async (req, res) => {
     // Get orders with joins
     const ordersQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
+             bu.full_name as backdated_by_name,
              t.table_number, t.location as table_location,
              o.bill_printed, o.bill_printed_at,
              (
@@ -212,6 +237,7 @@ router.get('/', scopeBranch, async (req, res) => {
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
+      LEFT JOIN users bu ON o.backdated_by = bu.id
       WHERE ${whereClause}
       ORDER BY o.created_at DESC
       LIMIT ? OFFSET ?
@@ -299,7 +325,7 @@ router.get('/receipts/history', requireRole(['admin', 'manager']), scopeBranch, 
     if (end_date)   { whereClause += ' AND DATE(o.bill_printed_at) <= ?'; values.push(end_date); }
 
     const rows = await query(
-      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone,
+      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone, o.is_backdated,
               o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
               o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
               p.payment_method, p.transaction_id, p.amount AS paid_amount, p.created_at AS payment_time
@@ -337,7 +363,7 @@ router.get('/transactions/report', requireRole(['admin', 'manager']), scopeBranc
 
     const txns = await query(
       `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
-              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount,
+              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount, o.is_backdated,
               o.customer_name, o.customer_phone, u.full_name AS waiter_name
        FROM payments p
        JOIN orders o ON o.id = p.order_id
@@ -459,6 +485,7 @@ router.get('/:id', validateId, async (req, res) => {
     // Get order details
     const orderQuery = `
       SELECT o.*, u.username as waiter_name, u.full_name as waiter_full_name,
+             bu.full_name as backdated_by_name,
              t.table_number, t.location as table_location,
              o.bill_printed, o.bill_printed_at,
              (
@@ -475,6 +502,7 @@ router.get('/:id', validateId, async (req, res) => {
       FROM orders o
       LEFT JOIN users u ON o.waiter_id = u.id
       LEFT JOIN tables t ON o.table_id = t.id
+      LEFT JOIN users bu ON o.backdated_by = bu.id
       -- Latest completed payment, so a re-printed bill can still show how it was paid.
       LEFT JOIN payments p ON p.id = (
         SELECT p2.id FROM payments p2
@@ -525,7 +553,56 @@ router.get('/:id', validateId, async (req, res) => {
   }
 });
 
-// ── Backdated order entry (admin only) ────────────────────────────────────────
+// ── Backdated order entry (admin + manager) ───────────────────────────────────
+// Records a sale after the fact, e.g. when the system was offline. The order is
+// saved done and paid, dated when the sale happened, and permanently marked
+// is_backdated with its reason and who entered it, so it stays visible in every
+// order list. Managers may only reach back backdate_manager_max_days.
+
+// Roles that can be credited with having served an order.
+const SERVING_ROLES = ['admin', 'manager', 'waiter'];
+
+const managerBackdateDays = async () => {
+  const [row] = await query(
+    "SELECT setting_value FROM system_settings WHERE setting_key = 'backdate_manager_max_days'"
+  );
+  const days = parseInt(row?.setting_value, 10);
+  return Number.isInteger(days) && days >= 0 ? days : 7;
+};
+
+// An optional 0–100 percentage from the request; undefined when not given.
+const optionalPercent = (value, label) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const pct = parseFloat(value);
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw clientError(`${label} must be between 0 and 100`);
+  return pct;
+};
+
+// What the backdate form needs: who can be credited as having served, how far back
+// this user may go (null = no limit), and today's charges to prefill.
+router.get('/backdate/options', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
+  try {
+    const branchId = req.scopedBranchId;
+    const staff = await query(
+      `SELECT id, full_name, username, role, is_active FROM users
+       WHERE role IN (?) ${branchId ? "AND (role = 'admin' OR branch_id = ?)" : ''}
+       ORDER BY is_active DESC, full_name`,
+      branchId ? [SERVING_ROLES, branchId] : [SERVING_ROLES]
+    );
+    const charges = await loadChargeSettings(query);
+    res.json({
+      staff,
+      max_days: req.user.role === 'admin' ? null : await managerBackdateDays(),
+      vat_percentage: charges.vatPercentage,
+      service_charge_percentage: charges.serviceChargePercentage,
+      delivery_fee: charges.deliveryFee,
+    });
+  } catch (error) {
+    console.error('Backdate options error:', error);
+    res.status(500).json({ error: 'Failed to load backdate options' });
+  }
+});
+
 router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const {
@@ -539,11 +616,16 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
       discount_amount = 0,
       payment_method = 'cash',
       payment_last4,
+      served_by,
+      vat_percentage,
+      service_charge_percentage,
+      delivery_details = {},
     } = req.body;
 
     // Validate required fields
     if (!backdated_at) return res.status(400).json({ error: 'backdated_at is required' });
     if (!reason || !reason.trim()) return res.status(400).json({ error: 'Reason is required for backdated entries' });
+    if (reason.trim().length > 500) return res.status(400).json({ error: 'Reason must be 500 characters or fewer' });
     if (!order_type || !['dine_in', 'delivery', 'direct'].includes(order_type)) return res.status(400).json({ error: 'Invalid order_type' });
     if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
     const validMethods = ['cash', 'card', 'bkash', 'nagad'];
@@ -552,9 +634,43 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
       if (!/^\d{4}$/.test(String(payment_last4 || ''))) return res.status(400).json({ error: 'Last 4 digits required for card/bkash/nagad' });
     }
 
+    // A line may carry the price actually charged on the day; omitted means today's.
+    const lineItems = [];
+    for (const item of items) {
+      const foodItemId = parseInt(item.food_item_id, 10);
+      const quantity = parseInt(item.quantity, 10);
+      if (!(foodItemId > 0) || !(quantity > 0)) {
+        return res.status(400).json({ error: 'Each item needs a food_item_id and a quantity of at least 1' });
+      }
+      const hasPrice = item.unit_price !== undefined && item.unit_price !== null;
+      if (hasPrice && !(parseFloat(item.unit_price) >= 0)) {
+        return res.status(400).json({ error: 'Item prices must be 0 or more' });
+      }
+      lineItems.push({
+        food_item_id: foodItemId,
+        quantity,
+        unit_price: hasPrice ? parseFloat(item.unit_price) : undefined,
+        special_instructions: item.special_instructions || null,
+      });
+    }
+    const overrides = {
+      vat_percentage: optionalPercent(vat_percentage, 'VAT'),
+      service_charge_percentage: optionalPercent(service_charge_percentage, 'Service charge'),
+    };
+
     const backdatedDate = new Date(backdated_at);
     if (isNaN(backdatedDate.getTime())) return res.status(400).json({ error: 'Invalid backdated_at date' });
     if (backdatedDate > new Date()) return res.status(400).json({ error: 'backdated_at cannot be in the future' });
+    if (req.user.role !== 'admin') {
+      const maxDays = await managerBackdateDays();
+      const earliest = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000);
+      if (backdatedDate < earliest) {
+        return res.status(403).json({
+          error: `Managers can backdate up to ${maxDays} days. Ask an admin to enter older sales.`,
+          code: 'BACKDATE_TOO_OLD',
+        });
+      }
+    }
 
     const orderBranchId = await resolveOrderBranch(req, order_type, table_id);
     if (!orderBranchId) {
@@ -568,68 +684,125 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
       }
     }
 
-    // Calculate totals using existing helper (no connection needed — read-only)
-    const { totals, lines } = await calculateOrderTotals(items, order_type, null, orderBranchId);
-    const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
-    const adjustedTotal = Math.max(0, totals.total_amount - safeDiscount);
-
-    // Insert order with backdated timestamps and final status
-    const orderNumber = generateOrderNumber();
-    const orderResult = await query(
-      `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
-        customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
-        delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-      [
-        orderNumber, orderBranchId, order_type,
-        order_type === 'dine_in' ? (table_id || null) : null,
-        req.user.id,
-        ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
-        ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
-        totals.subtotal, totals.vat_amount, totals.service_charge,
-        totals.delivery_fee, safeDiscount, adjustedTotal,
-        backdatedDate, backdatedDate, backdatedDate,
-      ]
-    );
-    const orderId = orderResult.insertId;
-
-    // Insert order items (status = ready, no kitchen queue)
-    for (const [i, item] of items.entries()) {
-      const { unitPrice } = lines[i];
-      await query(
-        `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
-        [orderId, item.food_item_id, item.quantity, unitPrice, unitPrice * item.quantity,
-         item.special_instructions || null, backdatedDate]
-      );
+    // Staff reports credit waiter_id, so it records who served; backdated_by records
+    // who typed the entry in.
+    const servedBy = served_by ? parseInt(served_by, 10) : req.user.id;
+    if (servedBy !== req.user.id) {
+      const staff = await findOne('users', { id: servedBy });
+      if (!staff || !SERVING_ROLES.includes(staff.role) || (staff.role !== 'admin' && staff.branch_id !== orderBranchId)) {
+        return res.status(400).json({ error: 'The staff member who served must belong to this branch' });
+      }
     }
 
-    // Insert payment record
-    const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
-    await query(
-      `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
-       VALUES (?, ?, ?, ?, 'completed', ?)`,
-      [orderId, payment_method, adjustedTotal,
-       payment_last4 ? `${payment_method.toUpperCase()}${txnSuffix}` : null,
-       backdatedDate]
-    );
+    // One transaction, so a failure part-way never leaves an order without its
+    // lines, payment or stock movement. Retries on an order_number collision.
+    let saved;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        saved = await transaction(async (conn) => {
+          const { totals, lines } = await calculateOrderTotals(lineItems, order_type, conn, orderBranchId, overrides);
+          const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
+          const totalAmount = Math.max(0, totals.total_amount - safeDiscount);
+          const orderNumber = generateOrderNumber(backdatedDate);
 
-    // Audit log
+          const [orderResult] = await conn.query(
+            `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
+              customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
+              delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
+              is_backdated, backdate_reason, backdated_by, backdate_entered_at,
+              created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, NOW(), ?, ?)`,
+            [
+              orderNumber, orderBranchId, order_type,
+              order_type === 'dine_in' ? (table_id || null) : null,
+              servedBy,
+              ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
+              ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
+              totals.subtotal, totals.vat_amount, totals.service_charge,
+              totals.delivery_fee, safeDiscount, totalAmount,
+              backdatedDate,
+              reason.trim(), req.user.id,
+              backdatedDate, backdatedDate,
+            ]
+          );
+          const orderId = orderResult.insertId;
+
+          // Lines are ready (no kitchen queue: the food went out long ago).
+          for (const [i, item] of lineItems.entries()) {
+            const { unitPrice } = lines[i];
+            await conn.query(
+              `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
+              [orderId, item.food_item_id, item.quantity, unitPrice, unitPrice * item.quantity,
+               item.special_instructions, backdatedDate]
+            );
+            // The food was really sold, but a past sale can't be refused for lack of
+            // stock today, so floor at zero rather than checking first.
+            await conn.query(
+              'UPDATE food_inventory SET current_stock = GREATEST(0, current_stock - ?), last_updated = NOW() WHERE food_item_id = ?',
+              [item.quantity, item.food_item_id]
+            );
+          }
+
+          // Delivery screens and the delivery report only list orders with a details row.
+          // The order is already paid in full, so nothing is due and it was delivered.
+          if (order_type === 'delivery') {
+            await conn.query(
+              `INSERT INTO delivery_details (order_id, customer_address, delivery_phone, advance_payment,
+                due_amount, delivery_status, delivery_notes, created_at)
+               VALUES (?, ?, ?, 0, 0, 'delivered', ?, ?)`,
+              [orderId, (delivery_details.customer_address || '').trim(), customer_phone || null,
+               delivery_details.delivery_notes || null, backdatedDate]
+            );
+          }
+
+          const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
+          await conn.query(
+            `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'completed', ?)`,
+            [orderId, payment_method, totalAmount,
+             payment_last4 ? `${payment_method.toUpperCase()}${txnSuffix}` : null,
+             backdatedDate]
+          );
+
+          await deductRecipeStock(orderId, orderBranchId, req.user.id, runner(conn), `Backdated sale ${orderNumber}`);
+
+          return { orderId, orderNumber, totalAmount };
+        });
+        break;
+      } catch (txErr) {
+        if (txErr.code === 'ER_DUP_ENTRY' && attempt < 2) continue;
+        throw txErr;
+      }
+    }
+
     await logManualAudit(
-      req.user.id, 'backdate_order', 'orders', orderId, null,
-      { order_number: orderNumber, backdated_at, reason: reason.trim(), total: adjustedTotal },
+      req.user.id, 'backdate_order', 'orders', saved.orderId, null,
+      {
+        order_number: saved.orderNumber,
+        backdated_at,
+        reason: reason.trim(),
+        served_by: servedBy,
+        total: saved.totalAmount,
+        // Only what was overridden; anything absent used today's menu and settings.
+        overrides: {
+          ...overrides,
+          unit_prices: lineItems.filter(i => i.unit_price !== undefined)
+            .map(i => ({ food_item_id: i.food_item_id, unit_price: i.unit_price })),
+        },
+      },
       req.ip, req.headers['user-agent']
     );
 
     res.status(201).json({
       message: 'Backdated order created successfully',
-      order_id: orderId,
-      order_number: orderNumber,
+      order_id: saved.orderId,
+      order_number: saved.orderNumber,
+      total_amount: saved.totalAmount,
     });
   } catch (error) {
     console.error('Backdate order error:', error);
-    res.status(500).json({ error: error.message || 'Failed to create backdated order' });
+    res.status(error.status || 500).json({ error: error.message || 'Failed to create backdated order' });
   }
 });
 

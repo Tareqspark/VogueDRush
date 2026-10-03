@@ -3,6 +3,7 @@ import { useQuery } from 'react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
+import { BackdateNote } from '../components/Orders/BackdateNote';
 
 // ─── Theme constants ─────────────────────────────────────────────
 const T = {
@@ -129,6 +130,7 @@ function OrderDetailModal({ detail, isFetching, onClose }) {
                     <span className="font-bold">Cancel Reason: </span>{order.cancellation_reason}
                   </div>
                 )}
+                {!!order.is_backdated && <div className="col-span-2"><BackdateNote order={order} /></div>}
               </div>
               {items.length > 0 && (
                 <div>

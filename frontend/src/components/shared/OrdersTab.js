@@ -3,6 +3,7 @@ import { useQuery } from 'react-query';
 import { ClockIcon, LockClosedIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
+import { BackdatedBadge, orderTimeLabel } from '../Orders/BackdateNote';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -92,8 +93,9 @@ export default function OrdersTab() {
                   )}
                   <span className="flex items-center gap-1 text-xs text-slate-400">
                     <ClockIcon className="h-3 w-3" />
-                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {orderTimeLabel(order)}
                   </span>
+                  <BackdatedBadge order={order} />
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>

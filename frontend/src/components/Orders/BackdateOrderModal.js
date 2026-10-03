@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import toast from 'react-hot-toast';
 import { XMarkIcon, PlusIcon, MinusIcon, TrashIcon, ClockIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
@@ -6,22 +6,30 @@ import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
 import { itemPrice } from '../../utils/price';
 
-const now = () => {
-  const d = new Date();
+// datetime-local wants local time without a zone.
+const toLocalInput = (date) => {
+  const d = new Date(date);
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0, 16);
 };
+const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+const money = (n) => `৳${n.toFixed(2)}`;
 
 export default function BackdateOrderModal({ onClose, onCreated }) {
-  const { api, selectedBranch } = useAuth();
+  const { api, user, selectedBranch } = useAuth();
 
   const [backdatedAt, setBackdatedAt] = useState('');
   const [reason, setReason] = useState('');
   const [orderType, setOrderType] = useState('dine_in');
   const [tableId, setTableId] = useState('');
+  const [servedBy, setServedBy] = useState(user?.id ? String(user.id) : '');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [deliveryNotes, setDeliveryNotes] = useState('');
   const [discount, setDiscount] = useState('0');
+  const [vatPct, setVatPct] = useState(null);   // null until today's settings load
+  const [scPct, setScPct] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentLast4, setPaymentLast4] = useState('');
   const [cart, setCart] = useState([]);
@@ -29,10 +37,22 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
   const [menuSearch, setMenuSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Staff to credit, the manager day limit, and today's charges to prefill.
+  const { data: options } = useQuery(
+    ['backdate-options', selectedBranch?.id],
+    () => api.get('/orders/backdate/options').then(r => r.data)
+  );
+  useEffect(() => {
+    if (!options) return;
+    setVatPct(prev => prev ?? String(options.vat_percentage));
+    setScPct(prev => prev ?? String(options.service_charge_percentage));
+  }, [options]);
+
   const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
+  // No is_available filter: availability is about today, and this sale is in the past.
   const { data: itemsData } = useQuery(
     ['backdate-menu', categoryFilter, menuSearch],
-    () => api.get('/menu/items', { params: { is_available: true, category_id: categoryFilter || undefined, search: menuSearch || undefined } }).then(r => r.data)
+    () => api.get('/menu/items', { params: { category_id: categoryFilter || undefined, search: menuSearch || undefined } }).then(r => r.data)
   );
   const { data: tablesData } = useQuery(
     'tables-list',
@@ -42,13 +62,20 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
   const categories = categoriesData?.categories || [];
   const menuItems  = itemsData?.items || [];
   const tables     = tablesData?.tables || [];
+  const staff      = options?.staff || [];
+  const minDate    = options?.max_days != null ? toLocalInput(Date.now() - options.max_days * 86400000) : undefined;
 
   const addToCart = (item) => {
     setCart(prev => {
       const existing = prev.find(c => c.food_item_id === item.id);
       if (existing) return prev.map(c => c.food_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { food_item_id: item.id, name: item.name, price: itemPrice(item), quantity: 1 }];
+      const today = itemPrice(item);
+      return [...prev, { food_item_id: item.id, name: item.name, todayPrice: today, price: String(today), quantity: 1 }];
     });
+  };
+
+  const updateLine = (food_item_id, changes) => {
+    setCart(prev => prev.map(c => c.food_item_id === food_item_id ? { ...c, ...changes } : c));
   };
 
   const updateQty = (food_item_id, delta) => {
@@ -58,13 +85,29 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
     );
   };
 
-  const subtotal = cart.reduce((s, c) => s + c.price * c.quantity, 0);
+  // Mirrors the server: VAT and service charge on the subtotal, delivery fee on
+  // delivery orders, and the discount taken off the total — the same as a normal bill.
+  const subtotal = cart.reduce((s, c) => s + num(c.price) * c.quantity, 0);
+  const vatRate = num(vatPct);
+  const scRate = orderType === 'dine_in' ? num(scPct) : 0;
+  const deliveryFee = orderType === 'delivery' ? num(options?.delivery_fee) : 0;
+  const vat = subtotal * vatRate / 100;
+  const serviceCharge = subtotal * scRate / 100;
+  const discountAmount = Math.max(0, num(discount));
+  const total = Math.max(0, subtotal + vat + serviceCharge + deliveryFee - discountAmount);
+
+  // Send a value only when it differs from today's, so the audit log lists real overrides.
+  const changedFrom = (input, today) => (input !== null && num(input) !== num(today) ? num(input) : undefined);
+  const validPct = (v) => v !== '' && num(v) >= 0 && num(v) <= 100;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!backdatedAt) { toast.error('Please select the order date & time'); return; }
+    if (minDate && backdatedAt < minDate) { toast.error(`Managers can backdate up to ${options.max_days} days`); return; }
     if (!reason.trim()) { toast.error('Reason is required'); return; }
     if (cart.length === 0) { toast.error('Add at least one item'); return; }
+    if (cart.some(c => c.price === '' || num(c.price) < 0)) { toast.error('Every item needs a price of 0 or more'); return; }
+    if (!validPct(vatPct) || (orderType === 'dine_in' && !validPct(scPct))) { toast.error('VAT and service charge must be 0–100%'); return; }
     if (orderType === 'dine_in' && !tableId) { toast.error('Select a table for dine-in'); return; }
     if (['card', 'bkash', 'nagad'].includes(paymentMethod) && !/^\d{4}$/.test(paymentLast4)) {
       toast.error('Enter last 4 digits for ' + paymentMethod); return;
@@ -77,10 +120,20 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
         reason: reason.trim(),
         order_type: orderType,
         table_id: orderType === 'dine_in' ? parseInt(tableId) : undefined,
+        served_by: servedBy ? parseInt(servedBy) : undefined,
         customer_name: ['delivery', 'direct'].includes(orderType) ? customerName : undefined,
         customer_phone: ['delivery', 'direct'].includes(orderType) ? customerPhone : undefined,
-        items: cart.map(c => ({ food_item_id: c.food_item_id, quantity: c.quantity })),
-        discount_amount: parseFloat(discount) || 0,
+        delivery_details: orderType === 'delivery'
+          ? { customer_address: address, delivery_notes: deliveryNotes || undefined }
+          : undefined,
+        items: cart.map(c => ({
+          food_item_id: c.food_item_id,
+          quantity: c.quantity,
+          unit_price: num(c.price) !== c.todayPrice ? num(c.price) : undefined,
+        })),
+        vat_percentage: changedFrom(vatPct, options?.vat_percentage),
+        service_charge_percentage: orderType === 'dine_in' ? changedFrom(scPct, options?.service_charge_percentage) : undefined,
+        discount_amount: discountAmount,
         payment_method: paymentMethod,
         payment_last4: ['card', 'bkash', 'nagad'].includes(paymentMethod) ? paymentLast4 : undefined,
         branch_id: selectedBranch?.id,
@@ -109,18 +162,22 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
 
-          {/* Date/time + Reason */}
+          {/* Date/time + type */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Order Date & Time <span className="text-rose-500">*</span></label>
               <input
                 type="datetime-local"
-                max={now()}
+                min={minDate}
+                max={toLocalInput(new Date())}
                 value={backdatedAt}
                 onChange={e => setBackdatedAt(e.target.value)}
                 required
                 className="input"
               />
+              {options?.max_days != null && (
+                <p className="text-xs text-slate-400 mt-1">Managers can go back up to {options.max_days} days.</p>
+              )}
             </div>
             <div>
               <label className="label">Order Type <span className="text-rose-500">*</span></label>
@@ -132,22 +189,35 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
             </div>
           </div>
 
-          {/* Table (dine_in) */}
-          {orderType === 'dine_in' && (
+          {/* Table (dine_in) + served by */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {orderType === 'dine_in' && (
+              <div>
+                <label className="label">Table <span className="text-rose-500">*</span></label>
+                <select value={tableId} onChange={e => setTableId(e.target.value)} className="select" required>
+                  <option value="">Select table</option>
+                  {tables.map(t => (
+                    <option key={t.id} value={t.id}>Table {t.table_number}{t.location ? ` — ${t.location}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
-              <label className="label">Table <span className="text-rose-500">*</span></label>
-              <select value={tableId} onChange={e => setTableId(e.target.value)} className="select" required>
-                <option value="">Select table</option>
-                {tables.map(t => (
-                  <option key={t.id} value={t.id}>Table {t.table_number}{t.location ? ` — ${t.location}` : ''}</option>
+              <label className="label">Served By</label>
+              <select value={servedBy} onChange={e => setServedBy(e.target.value)} className="select">
+                {staff.length === 0 && user && <option value={user.id}>{user.full_name || user.username}</option>}
+                {staff.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name || s.username} · {s.role}{s.is_active ? '' : ' (inactive)'}
+                  </option>
                 ))}
               </select>
             </div>
-          )}
+          </div>
 
           {/* Customer (delivery/direct) */}
           {['delivery', 'direct'].includes(orderType) && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Customer Name</label>
                 <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className="input" placeholder="Optional" />
@@ -156,6 +226,18 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
                 <label className="label">Customer Phone</label>
                 <input type="text" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} className="input" placeholder="Optional" />
               </div>
+              {orderType === 'delivery' && (
+                <>
+                  <div>
+                    <label className="label">Delivery Address</label>
+                    <input type="text" value={address} onChange={e => setAddress(e.target.value)} className="input" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className="label">Delivery Notes</label>
+                    <input type="text" value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)} className="input" placeholder="Optional" />
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -166,6 +248,7 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
               value={reason}
               onChange={e => setReason(e.target.value)}
               required
+              maxLength={500}
               rows={2}
               placeholder="e.g. System was offline, order not entered at the time..."
               className="input resize-none"
@@ -207,36 +290,63 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
                   className="text-left p-2 rounded-xl border border-slate-100 hover:bg-sky-50 hover:border-sky-200 transition-colors"
                 >
                   <div className="text-xs font-bold text-slate-700 truncate">{item.name}</div>
-                  <div className="text-xs text-sky-600 font-semibold">৳{itemPrice(item).toFixed(0)}</div>
+                  <div className="text-xs text-sky-600 font-semibold">
+                    ৳{itemPrice(item).toFixed(0)}
+                    {!item.is_available && <span className="ml-1 text-slate-400 font-normal">· unavailable today</span>}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Cart */}
+          {/* Cart — the price is editable: enter what was actually charged that day */}
           {cart.length > 0 && (
             <div className="border border-slate-100 rounded-xl overflow-hidden">
-              <div className="bg-slate-50 px-3 py-2 text-xs font-black text-slate-500 uppercase tracking-wide">Order Items</div>
+              <div className="bg-slate-50 px-3 py-2 text-xs font-black text-slate-500 uppercase tracking-wide flex justify-between">
+                <span>Order Items</span><span className="normal-case font-semibold">Unit price as charged</span>
+              </div>
               {cart.map(c => (
-                <div key={c.food_item_id} className="flex items-center gap-3 px-3 py-2 border-t border-slate-50">
-                  <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{c.name}</span>
-                  <span className="text-xs text-sky-600 font-bold w-16 text-right">৳{(c.price * c.quantity).toFixed(0)}</span>
+                <div key={c.food_item_id} className="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-slate-50">
+                  <span className="flex-1 min-w-[8rem] text-sm font-semibold text-slate-700 truncate">{c.name}</span>
+                  <input
+                    type="number" min="0" step="any"
+                    value={c.price}
+                    onChange={e => updateLine(c.food_item_id, { price: e.target.value })}
+                    className={`input w-20 py-1 text-right text-sm ${num(c.price) !== c.todayPrice ? 'border-violet-300 bg-violet-50' : ''}`}
+                    title={`Today's price: ৳${c.todayPrice}`}
+                  />
                   <div className="flex items-center gap-1">
                     <button type="button" onClick={() => updateQty(c.food_item_id, -1)} className="p-1 rounded hover:bg-slate-100"><MinusIcon className="h-3.5 w-3.5 text-slate-500" /></button>
                     <span className="w-5 text-center text-sm font-black text-slate-700">{c.quantity}</span>
                     <button type="button" onClick={() => updateQty(c.food_item_id, 1)} className="p-1 rounded hover:bg-slate-100"><PlusIcon className="h-3.5 w-3.5 text-slate-500" /></button>
-                    <button type="button" onClick={() => setCart(prev => prev.filter(x => x.food_item_id !== c.food_item_id))} className="p-1 rounded hover:bg-rose-50 ml-1"><TrashIcon className="h-3.5 w-3.5 text-rose-400" /></button>
                   </div>
+                  <span className="text-xs text-sky-600 font-bold w-16 text-right">৳{(num(c.price) * c.quantity).toFixed(0)}</span>
+                  <button type="button" onClick={() => setCart(prev => prev.filter(x => x.food_item_id !== c.food_item_id))} className="p-1 rounded hover:bg-rose-50"><TrashIcon className="h-3.5 w-3.5 text-rose-400" /></button>
                 </div>
               ))}
-              <div className="px-3 py-2 border-t border-slate-100 text-sm font-black text-slate-700 flex justify-between">
-                <span>Subtotal</span><span>৳{subtotal.toFixed(0)}</span>
-              </div>
             </div>
           )}
 
+          {/* Charges — prefilled with today's settings; change them to match the day */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <label className="label">VAT %</label>
+              <input type="number" min="0" max="100" step="any" value={vatPct ?? ''} onChange={e => setVatPct(e.target.value)} className="input" />
+            </div>
+            {orderType === 'dine_in' && (
+              <div>
+                <label className="label">Service Charge %</label>
+                <input type="number" min="0" max="100" step="any" value={scPct ?? ''} onChange={e => setScPct(e.target.value)} className="input" />
+              </div>
+            )}
+            <div>
+              <label className="label">Discount (৳)</label>
+              <input type="number" min="0" value={discount} onChange={e => setDiscount(e.target.value)} className="input" />
+            </div>
+          </div>
+
           {/* Payment */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Payment Method <span className="text-rose-500">*</span></label>
               <select value={paymentMethod} onChange={e => { setPaymentMethod(e.target.value); setPaymentLast4(''); }} className="select">
@@ -259,19 +369,34 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
                 />
               </div>
             )}
-            <div>
-              <label className="label">Discount (৳)</label>
-              <input type="number" min="0" value={discount} onChange={e => setDiscount(e.target.value)} className="input" />
-            </div>
           </div>
+
+          {/* What will be saved — the same breakdown the bill would show */}
+          {cart.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm space-y-1">
+              <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{money(subtotal)}</span></div>
+              <div className="flex justify-between text-slate-600"><span>VAT ({vatRate}%)</span><span>{money(vat)}</span></div>
+              {orderType === 'dine_in' && (
+                <div className="flex justify-between text-slate-600"><span>Service charge ({scRate}%)</span><span>{money(serviceCharge)}</span></div>
+              )}
+              {deliveryFee > 0 && (
+                <div className="flex justify-between text-slate-600"><span>Delivery fee</span><span>{money(deliveryFee)}</span></div>
+              )}
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-rose-600"><span>Discount</span><span>−{money(discountAmount)}</span></div>
+              )}
+              <div className="flex justify-between font-black text-slate-800 border-t border-slate-200 pt-1">
+                <span>Recorded as paid ({paymentMethod})</span><span>{money(total)}</span>
+              </div>
+            </div>
+          )}
 
         </form>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-slate-500">
-            Total: <span className="font-black text-slate-800">৳{Math.max(0, subtotal - (parseFloat(discount) || 0)).toFixed(0)}</span>
-            <span className="ml-2 text-xs text-slate-400">(before VAT/SC)</span>
+            Total: <span className="font-black text-slate-800">{money(total)}</span>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>

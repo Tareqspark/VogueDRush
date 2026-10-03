@@ -8,7 +8,7 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 const SETTING_GROUPS = {
   'Restaurant Info': ['restaurant_name', 'restaurant_address', 'restaurant_phone', 'restaurant_email', 'restaurant_vat_number'],
   'Financial': ['vat_percentage', 'delivery_fee'],
-  'Operational': ['opening_time', 'closing_time', 'max_party_size', 'reservation_advance_days', 'table_hold_minutes'],
+  'Operational': ['opening_time', 'closing_time', 'max_party_size', 'reservation_advance_days', 'table_hold_minutes', 'backdate_manager_max_days'],
   'Currency': ['currency_symbol', 'currency_code'],
 };
 

@@ -13,6 +13,7 @@ import TabNavigation from '../components/Layout/TabNavigation';
 import ReceiptsTab from '../components/shared/ReceiptsTab';
 import TransactionsTab from '../components/shared/TransactionsTab';
 import BackdateOrderModal from '../components/Orders/BackdateOrderModal';
+import { BackdatedBadge, BackdateNote, orderTimeLabel } from '../components/Orders/BackdateNote';
 import OrdersTab from '../components/shared/OrdersTab';
 import KitchenTab from '../components/shared/KitchenTab';
 import { printReceipt } from '../utils/receipt';
@@ -49,6 +50,7 @@ export default function Orders() {
   const [showSearch, setShowSearch] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterBackdated, setFilterBackdated] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [holdingOrder, setHoldingOrder] = useState(null);
@@ -57,8 +59,8 @@ export default function Orders() {
 
   // ── Data fetching ──────────────────────────────────────────────
   const { data: ordersData, isLoading } = useQuery(
-    ['orders', filterStatus, filterType, selectedBranch?.id],
-    () => api.get('/orders', { params: { status: filterStatus || undefined, order_type: filterType || undefined, limit: 100, branch_id: selectedBranch?.id } }).then(r => r.data),
+    ['orders', filterStatus, filterType, filterBackdated, selectedBranch?.id],
+    () => api.get('/orders', { params: { status: filterStatus || undefined, order_type: filterType || undefined, backdated: filterBackdated || undefined, limit: 100, branch_id: selectedBranch?.id } }).then(r => r.data),
     { refetchInterval: 15000 }
   );
 
@@ -137,6 +139,10 @@ export default function Orders() {
           <option value="delivery">Delivery</option>
           <option value="direct">Takeway</option>
         </select>
+        <select value={filterBackdated} onChange={e => setFilterBackdated(e.target.value)} className="select w-40">
+          <option value="">All Entries</option>
+          <option value="true">Backdated Only</option>
+        </select>
       </div>
 
       {/* Orders list */}
@@ -166,8 +172,9 @@ export default function Orders() {
                   )}
                   <span className="flex items-center gap-1 text-xs text-slate-400">
                     <ClockIcon className="h-3 w-3" />
-                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {orderTimeLabel(order)}
                   </span>
+                  <BackdatedBadge order={order} />
                 </div>
                 <div className="flex items-center gap-2.5">
                   <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_COLORS[order.status] || STATUS_COLORS.pending}`}>
@@ -529,6 +536,8 @@ function OrderDetailModal({ detail, onClose, onUpdateStatus, onPrintBill, onEdit
               <span className="font-bold">Cancel Reason: </span>{order.cancellation_reason}
             </div>
           )}
+
+          <BackdateNote order={order} />
 
           {showBillPopup && (
             <div className="mt-2 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">

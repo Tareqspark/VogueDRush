@@ -83,7 +83,9 @@ Production runs **MySQL 8.0** (checked 2026-10-04; older code comments say 5.7).
 
 The table and every item must belong to that branch.
 
-Every path that writes `order_items` prices through `priceItem`: branch override, then promotional price, then list price. That's the same rule as the menu's `effective_price`. The client copy of the rule is `frontend/src/utils/price.js`. It retries up to 3 times on an `order_number` collision. The order status enum is `pending, preparing, ready, done, cancelled, hold`. When an order is billed (`POST /:id/bill`) or fully paid (`POST /:id/payments`), `deductRecipeStock` runs in the background without blocking the response. It writes BOM deductions to `ingredients` and `stock_ledger`.
+Every path that writes `order_items` prices through `priceItem`: branch override, then promotional price, then list price. That's the same rule as the menu's `effective_price`. The client copy of the rule is `frontend/src/utils/price.js`.
+
+`POST /orders/backdate` records a past sale in one transaction, including stock deduction. The order is flagged `is_backdated` and stores `backdate_reason` and `backdated_by`. `created_at` holds the sale time (which reports key on); `backdate_entered_at` holds when it was typed in. `waiter_id` is whoever served. Managers are limited by the `backdate_manager_max_days` setting. It retries up to 3 times on an `order_number` collision. The order status enum is `pending, preparing, ready, done, cancelled, hold`. When an order is billed (`POST /:id/bill`) or fully paid (`POST /:id/payments`), `deductRecipeStock` runs in the background without blocking the response. It writes BOM deductions to `ingredients` and `stock_ledger`.
 
 ### Sockets
 The server assigns rooms on connect with `roomsFor(user)` from `backend/utils/socketRooms.js`. The client can't choose them.

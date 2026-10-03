@@ -565,6 +565,21 @@ server.listen(PORT, async () => {
   await patch('users.role includes manager',
     `ALTER TABLE users MODIFY COLUMN role ENUM('admin','manager','waiter','kitchen') NOT NULL DEFAULT 'waiter'`);
 
+  // Backdated entries carry their own marker so they stay visible after saving.
+  // created_at holds when the sale happened; backdate_entered_at when it was typed in.
+  await patch('orders.is_backdated',
+    `ALTER TABLE orders ADD COLUMN is_backdated TINYINT(1) NOT NULL DEFAULT 0`);
+  await patch('orders.backdate_reason',
+    `ALTER TABLE orders ADD COLUMN backdate_reason VARCHAR(500) NULL`);
+  await patch('orders.backdated_by',
+    `ALTER TABLE orders ADD COLUMN backdated_by INT NULL`);
+  await patch('orders.backdate_entered_at',
+    `ALTER TABLE orders ADD COLUMN backdate_entered_at TIMESTAMP NULL`);
+  await patch('backdate_manager_max_days setting', `
+    INSERT IGNORE INTO system_settings (setting_key, setting_value, description, data_type)
+    VALUES ('backdate_manager_max_days', '7',
+            'How many days back a manager may enter a backdated order. Admins have no limit.', 'number')`);
+
   await patch('tables.branch_id',
     `ALTER TABLE tables ADD COLUMN branch_id INT NULL DEFAULT NULL`);
 

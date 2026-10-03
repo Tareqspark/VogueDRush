@@ -24,6 +24,7 @@ import RecentOrders from '../components/Dashboard/RecentOrders';
 import KitchenStatus from '../components/Dashboard/KitchenStatus';
 import TableStatus from '../components/Dashboard/TableStatus';
 import TodayReservations from '../components/Dashboard/TodayReservations';
+import { BackdateNote } from '../components/Orders/BackdateNote';
 
 const Dashboard = () => {
   const { user, api } = useAuth();
@@ -699,6 +700,7 @@ const Dashboard = () => {
                     <span className="font-semibold">Cancel Note:</span> {viewingOrderDetail.order.cancellation_reason}
                   </div>
                 )}
+                <BackdateNote order={viewingOrderDetail.order} />
                 <button onClick={() => { setViewingOrder(null); navigate('/orders'); }} className="w-full btn btn-secondary btn-sm mt-2">Open in Orders Page</button>
               </div>
             )}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
+import { BackdatedBadge } from '../Orders/BackdateNote';
 
 export default function TransactionsTab() {
   const { api } = useAuth();
@@ -70,6 +71,7 @@ export default function TransactionsTab() {
               <div className="flex justify-between items-start gap-2">
                 <div>
                   <span className="font-mono font-black text-slate-700 text-sm">{t.order_number}</span>
+                  {!!t.is_backdated && <span className="inline-flex ml-2 align-middle"><BackdatedBadge order={t} /></span>}
                   <div className="text-xs text-slate-400 mt-0.5">
                     {t.transaction_id?.startsWith('NAGAD-') ? 'Nagad' : t.payment_method || '—'}
                     {t.transaction_id ? ` · ${t.transaction_id}` : ''}
