@@ -47,13 +47,11 @@ export default function Kitchen() {
 
   useEffect(() => {
     if (!socket) return;
-    socket.emit('join-kitchen');
-    socket.on('kitchen-update', () => queryClient.invalidateQueries('kitchen'));
-    socket.on('order-status-update', () => queryClient.invalidateQueries('kitchen'));
-    return () => {
-      socket.off('kitchen-update');
-      socket.off('order-status-update');
-    };
+    const refresh = () => queryClient.invalidateQueries('kitchen');
+    const events = ['new-order', 'kitchen-update', 'order-status-update'];
+    events.forEach(e => socket.on(e, refresh));
+    // Remove only our handler — a bare off(e) would also strip SocketContext's toasts.
+    return () => events.forEach(e => socket.off(e, refresh));
   }, [socket, queryClient]);
 
   const { data, isLoading, refetch } = useQuery(

@@ -4,6 +4,7 @@ const { requireRole, scopeBranch } = require('../middleware/auth');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { validateOrder, validateId } = require('../middleware/validation');
 const { logManualAudit } = require('../middleware/audit');
+const { branchRooms } = require('../utils/socketRooms');
 
 const router = express.Router();
 
@@ -45,42 +46,66 @@ const generateOrderNumber = () => {
   return `ORD${year}${month}${day}${random}`;
 };
 
-// Calculate order totals.
+// Runs SQL on a transaction's connection when given one, else on the pool.
+// Either way it resolves to the rows.
+const runner = (connection) => async (sql, params) =>
+  connection ? (await connection.query(sql, params))[0] : query(sql, params);
+
+// Prices one item for one branch, with the rule the menu shows (GET /menu/items):
+// branch override, then promotional price, then list price. Every path that writes
+// order_items must price through here, so line totals add up to the order subtotal —
+// PUT /:id/items recomputes the subtotal from those lines.
+// Throws unless the item is available and on this branch's menu.
+const priceItem = async (run, foodItemId, branchId) => {
+  const rows = await run(
+    `SELECT fi.*, COALESCE(bip.price, fi.promotional_price, fi.price) AS unit_price
+     FROM food_items fi
+     LEFT JOIN branch_item_prices bip ON bip.food_item_id = fi.id AND bip.branch_id = ?
+     WHERE fi.id = ?`,
+    [branchId, foodItemId]
+  );
+  const foodItem = rows[0];
+  if (!foodItem || !foodItem.is_available) {
+    throw new Error(`Food item ${foodItemId} not available`);
+  }
+  if (foodItem.branch_id !== branchId) {
+    throw new Error(`Food item ${foodItemId} is not on this branch's menu`);
+  }
+  return { foodItem, unitPrice: parseFloat(foodItem.unit_price) };
+};
+
+// The branch a new order is booked to. Non-admins always book to their own branch,
+// whatever the request says. Admins pick one with branch_id or the X-Branch-Id header
+// (the branch selector); with neither, a dine-in order takes its table's branch.
+// Returns null when no branch can be determined.
+const resolveOrderBranch = async (req, orderType, tableId) => {
+  if (req.user.role !== 'admin') return req.user.branch_id || null;
+  const picked = parseInt(req.body.branch_id || req.headers['x-branch-id'], 10);
+  if (picked > 0) return picked;
+  if (orderType === 'dine_in' && tableId) {
+    const table = await findOne('tables', { id: tableId });
+    return table ? table.branch_id : null;
+  }
+  return null;
+};
+
+const branchRequiredError = (req) => req.user.role === 'admin'
+  ? { status: 400, error: 'Select a branch before creating an order', code: 'BRANCH_REQUIRED' }
+  : { status: 403, error: 'Your account is not assigned to a branch', code: 'NO_BRANCH_ASSIGNED' };
+
+// Calculate order totals, and the unit price of each line (same order as `items`).
 // C-2 fix: accept an optional `connection` so this can run inside a SERIALIZABLE transaction
 //          using the same connection, avoiding TOCTOU price races.
 // M-2 fix: use global `vat_percentage` from system_settings so the Settings page is effective.
-const calculateOrderTotals = async (items, orderType, connection = null, branchId = null) => {
+const calculateOrderTotals = async (items, orderType, connection, branchId) => {
   let subtotal = 0;
-
-  const dbQuery = async (sql, params) => {
-    if (connection) {
-      const [rows] = await connection.query(sql, params);
-      return rows;
-    }
-    return query(sql, params);
-  };
+  const dbQuery = runner(connection);
+  const lines = [];
 
   for (const item of items) {
-    const rows = await dbQuery(
-      'SELECT id, price, promotional_price, is_available FROM food_items WHERE id = ?',
-      [item.food_item_id]
-    );
-    const foodItem = rows[0];
-    if (!foodItem || !foodItem.is_available) {
-      throw new Error(`Food item ${item.food_item_id} not available`);
-    }
-
-    // Branch-specific price takes priority over promotional price
-    let unitPrice = foodItem.promotional_price || foodItem.price;
-    if (branchId) {
-      const branchPriceRows = await dbQuery(
-        'SELECT price FROM branch_item_prices WHERE food_item_id = ? AND branch_id = ?',
-        [item.food_item_id, branchId]
-      );
-      if (branchPriceRows.length > 0) unitPrice = branchPriceRows[0].price;
-    }
-
-    subtotal += unitPrice * item.quantity;
+    const line = await priceItem(dbQuery, item.food_item_id, branchId);
+    lines.push(line);
+    subtotal += line.unitPrice * item.quantity;
   }
 
   // Fetch relevant settings via the same connection
@@ -101,7 +126,7 @@ const calculateOrderTotals = async (items, orderType, connection = null, branchI
   const serviceCharge = (subtotal * serviceChargePercentage) / 100;
   const totalAmount = subtotal + vatAmount + serviceCharge + deliveryFee;
 
-  return {
+  const totals = {
     subtotal,
     vat_amount: vatAmount,
     service_charge: serviceCharge,
@@ -109,6 +134,7 @@ const calculateOrderTotals = async (items, orderType, connection = null, branchI
     discount_amount: 0,
     total_amount: totalAmount
   };
+  return { totals, lines };
 };
 
 // Get all orders with filtering and pagination
@@ -513,7 +539,6 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
       discount_amount = 0,
       payment_method = 'cash',
       payment_last4,
-      branch_id,
     } = req.body;
 
     // Validate required fields
@@ -531,10 +556,20 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
     if (isNaN(backdatedDate.getTime())) return res.status(400).json({ error: 'Invalid backdated_at date' });
     if (backdatedDate > new Date()) return res.status(400).json({ error: 'backdated_at cannot be in the future' });
 
-    const orderBranchId = branch_id || req.headers['x-branch-id'] || 1;
+    const orderBranchId = await resolveOrderBranch(req, order_type, table_id);
+    if (!orderBranchId) {
+      const { status, ...body } = branchRequiredError(req);
+      return res.status(status).json(body);
+    }
+    if (order_type === 'dine_in' && table_id) {
+      const table = await findOne('tables', { id: table_id });
+      if (!table || table.branch_id !== orderBranchId) {
+        return res.status(400).json({ error: 'Table is not in this branch' });
+      }
+    }
 
     // Calculate totals using existing helper (no connection needed — read-only)
-    const totals = await calculateOrderTotals(items, order_type, null, parseInt(orderBranchId) || null);
+    const { totals, lines } = await calculateOrderTotals(items, order_type, null, orderBranchId);
     const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
     const adjustedTotal = Math.max(0, totals.total_amount - safeDiscount);
 
@@ -547,7 +582,7 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
         created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       [
-        orderNumber, parseInt(orderBranchId) || 1, order_type,
+        orderNumber, orderBranchId, order_type,
         order_type === 'dine_in' ? (table_id || null) : null,
         req.user.id,
         ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
@@ -560,11 +595,8 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
     const orderId = orderResult.insertId;
 
     // Insert order items (status = ready, no kitchen queue)
-    for (const item of items) {
-      const foodRows = await query('SELECT * FROM food_items WHERE id = ?', [item.food_item_id]);
-      const foodItem = foodRows[0];
-      if (!foodItem) continue;
-      const unitPrice = foodItem.promotional_price || foodItem.price;
+    for (const [i, item] of items.entries()) {
+      const { unitPrice } = lines[i];
       await query(
         `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
@@ -612,10 +644,13 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       items,
       special_instructions,
       delivery_details,
-      branch_id,
     } = req.body;
-    const orderBranchId = branch_id || req.headers['x-branch-id'] || 1;
-    
+    const orderBranchId = await resolveOrderBranch(req, order_type, table_id);
+    if (!orderBranchId) {
+      const { status, ...body } = branchRequiredError(req);
+      return res.status(status).json(body);
+    }
+
     // M-5: Retry up to 3 times on order_number collision (ER_DUP_ENTRY)
     let result;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -631,6 +666,9 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
         const table = tableRows[0];
         if (!table) {
           throw new Error('Table not found');
+        }
+        if (table.branch_id !== orderBranchId) {
+          throw new Error('Table is not in this branch');
         }
         if (table.status !== 'available') {
           throw new Error('Table is not available');
@@ -657,12 +695,12 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       }
       
       // Calculate totals — pass connection and branchId so branch pricing is applied
-      const totals = await calculateOrderTotals(items, order_type, connection, parseInt(orderBranchId) || null);
-      
+      const { totals, lines } = await calculateOrderTotals(items, order_type, connection, orderBranchId);
+
       // Insert order
       const orderData = {
         order_number: generateOrderNumber(),
-        branch_id: parseInt(orderBranchId) || 1,
+        branch_id: orderBranchId,
         order_type,
         table_id: order_type === 'dine_in' ? (table_id || null) : null,
         waiter_id: req.user.id,
@@ -682,14 +720,8 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
       const orderId = orderResult.insertId;
       
       // Insert order items and update inventory
-      for (const item of items) {
-        const [foodItemRows] = await connection.query(
-          'SELECT * FROM food_items WHERE id = ?',
-          [item.food_item_id]
-        );
-        
-        const foodItem = foodItemRows[0];
-        const unitPrice = foodItem.promotional_price || foodItem.price;
+      for (const [i, item] of items.entries()) {
+        const { foodItem, unitPrice } = lines[i];
         const itemTotal = unitPrice * item.quantity;
         
         const itemData = {
@@ -782,15 +814,16 @@ router.post('/', rateLimiters.orderCreation, validateOrder, async (req, res) => 
     // Emit real-time events
     const io = req.app.get('io');
     if (io) {
-      io.to('kitchen').emit('new-order', {
+      io.to(branchRooms('kitchen', order.branch_id)).emit('new-order', {
         order_id: result,
+        order_number: order.order_number,
         order_type: order.order_type,
         table_id: order.table_id,
         items_count: items.length
       });
-      
+
       if (order.table_id) {
-        io.to('waiter').emit('table-occupied', {
+        io.to(branchRooms('floor', order.branch_id)).emit('table-occupied', {
           table_id: order.table_id,
           order_id: result
         });
@@ -870,7 +903,7 @@ router.patch('/:id/hold', validateId, async (req, res) => {
     if (io) {
       io.emit('order-status-update', { orderId: parseInt(id), oldStatus: order.status, newStatus: 'hold' });
       io.emit('kitchen-update', { orderId: parseInt(id), action: 'hold_cleared' });
-      if (order.table_id) io.to('waiter').emit('table-available', { table_id: order.table_id });
+      if (order.table_id) io.to(branchRooms('floor', order.branch_id)).emit('table-available', { table_id: order.table_id });
     }
     const updatedOrder = await findOne('orders', { id });
     res.json({ message: 'Order put on hold. Table released. Kitchen items marked ready.', order: updatedOrder });
@@ -984,8 +1017,8 @@ router.patch('/:id/status', validateId, async (req, res) => {
       });
       
       if (status === 'preparing' || status === 'ready') {
-        io.to('kitchen').emit('kitchen-update', { 
-          action: 'status-change', 
+        io.to(branchRooms('kitchen', order.branch_id)).emit('kitchen-update', {
+          action: 'status-change',
           orderId: parseInt(id), 
           status 
         });
@@ -1168,12 +1201,9 @@ router.put('/:id/items', validateId, async (req, res) => {
 
       // Add items
       for (const item of add_items) {
-        const [foodRows] = await conn.query('SELECT * FROM food_items WHERE id = ? AND is_available = 1', [item.food_item_id]);
-        const fi = foodRows[0];
-        if (!fi) throw new Error(`Food item ${item.food_item_id} not found or unavailable`);
+        const { foodItem: fi, unitPrice } = await priceItem(runner(conn), item.food_item_id, order.branch_id);
 
         const qty = parseInt(item.quantity) || 1;
-        const unitPrice = fi.promotional_price || fi.price;
         const itemTotal = unitPrice * qty;
 
         const [oir] = await conn.query(

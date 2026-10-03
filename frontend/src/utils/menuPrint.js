@@ -2,6 +2,7 @@
 // Deliberately separate from receipt.js: that renders a transaction record on a
 // till roll, this renders a customer-facing menu on paper.
 import toast from 'react-hot-toast';
+import { itemPrice } from './price';
 
 const MENU_CSS = `
 @page { size: A4; margin: 16mm 14mm; }
@@ -34,7 +35,6 @@ body {
 `;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const priceOf = (it) => parseFloat(it.effective_price ?? it.promotional_price ?? it.price ?? 0);
 
 // Groups flat items into their categories, preserving the order the API returned
 // (fc.display_order, then fi.display_order) rather than re-sorting alphabetically.
@@ -66,7 +66,7 @@ export function buildMenuHtml({ items = [], restaurant = {} }) {
             <div class="item-line">
               <span class="item-name">${esc(it.name)}</span>
               <span class="dots"></span>
-              <span class="item-price">${currency}${priceOf(it).toFixed(2)}</span>
+              <span class="item-price">${currency}${itemPrice(it).toFixed(2)}</span>
             </div>
             ${it.description ? `<div class="item-desc">${esc(it.description)}</div>` : ''}
           </div>`).join('')}

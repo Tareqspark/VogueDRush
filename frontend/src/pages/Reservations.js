@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import { printReceipt } from '../utils/receipt';
+import { itemPrice } from '../utils/price';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -265,7 +266,7 @@ function ReservationOrderModal({ api, reservation, onClose, onCompleted }) {
     setCart(prev => {
       const ex = prev.find(c => c.id === item.id);
       if (ex) return prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c);
-      return [...prev, { id: item.id, name: item.name, price: parseFloat(item.promotional_price || item.price), qty: 1 }];
+      return [...prev, { id: item.id, name: item.name, price: itemPrice(item), qty: 1 }];
     });
 
   const changeQty = (id, delta) =>
@@ -442,7 +443,7 @@ function ReservationOrderModal({ api, reservation, onClose, onCompleted }) {
                 <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
                 <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
+                  <span className="text-sky-600 font-black text-sm">৳{itemPrice(item).toFixed(0)}</span>
                   {item.promotional_price && <span className="text-xs text-slate-300 line-through">৳{parseFloat(item.price).toFixed(0)}</span>}
                 </div>
               </button>

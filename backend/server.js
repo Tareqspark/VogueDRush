@@ -51,6 +51,7 @@ const { authenticateToken, cleanupExpiredTokens } = require('./middleware/auth')
 const { logAudit } = require('./middleware/audit');
 const { errorHandler, asyncHandler, notFound } = require('./middleware/errorHandler');
 const { createRateLimiter, rateLimiters, createRoleBasedLimiter } = require('./middleware/rateLimiter');
+const { roomsFor, branchRooms } = require('./utils/socketRooms');
 const database = require('./config/database');
 
 const app = express();
@@ -222,8 +223,8 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log(`User ${socket.user.username} connected:`, socket.id);
   
-  // Join role-based rooms for real-time updates
-  socket.join(socket.user.role); // admin or waiter
+  // Branch-scoped staff rooms (see utils/socketRooms.js). The client has no say in these.
+  socket.join(roomsFor(socket.user));
   socket.join('all-users');
   
   // Join order-specific rooms if needed
@@ -265,24 +266,23 @@ io.on('connection', (socket) => {
       }
       
       await update('kitchen_queue', updateData, { id: orderItemId });
-      
-      // Broadcast to relevant rooms
-      io.to('kitchen').emit('kitchen-update', {
-        orderItemId,
-        status,
-        updatedBy: socket.user.username,
-        timestamp: new Date()
-      });
-      
+
       // Get order details for room broadcasting
       const orderDetails = await query(`
-        SELECT kq.order_id, o.order_number 
-        FROM kitchen_queue kq 
-        JOIN orders o ON kq.order_id = o.id 
+        SELECT kq.order_id, o.order_number, o.branch_id
+        FROM kitchen_queue kq
+        JOIN orders o ON kq.order_id = o.id
         WHERE kq.id = ?
       `, [orderItemId]);
-      
+
       if (orderDetails[0]) {
+        io.to(branchRooms('kitchen', orderDetails[0].branch_id)).emit('kitchen-update', {
+          orderItemId,
+          status,
+          updatedBy: socket.user.username,
+          timestamp: new Date()
+        });
+
         io.to(`order-${orderDetails[0].order_id}`).emit('order-item-status', {
           orderItemId,
           status,

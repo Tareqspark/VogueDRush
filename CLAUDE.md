@@ -75,10 +75,23 @@ Production runs **MySQL 5.7**. That rules out `ADD COLUMN IF NOT EXISTS`, and DE
 - Money settings come from `system_settings` (`vat_percentage`, `service_charge_percentage`, `delivery_fee`). Read them with `??`, not `||`, so a configured `0` survives. Service charge applies to dine-in only.
 
 ### Order flow (`backend/routes/orders.js`)
-`POST /orders` runs in a SERIALIZABLE transaction. It locks the table (`FOR UPDATE`) and marks it occupied, checks and decrements `food_inventory`, computes totals server-side, and inserts `order_items` plus one `kitchen_queue` row per item. It retries up to 3 times on an `order_number` collision. The order status enum is `pending, preparing, ready, done, cancelled, hold`. When an order is billed (`POST /:id/bill`) or fully paid (`POST /:id/payments`), `deductRecipeStock` runs in the background without blocking the response. It writes BOM deductions to `ingredients` and `stock_ledger`.
+`POST /orders` runs in a SERIALIZABLE transaction. It locks the table (`FOR UPDATE`) and marks it occupied, checks and decrements `food_inventory`, computes totals server-side, and inserts `order_items` plus one `kitchen_queue` row per item.
+
+`resolveOrderBranch` picks the branch:
+- Non-admins always book to their own branch.
+- Admins use `branch_id` or `X-Branch-Id`. With neither, a dine-in order takes its table's branch.
+
+The table and every item must belong to that branch.
+
+Every path that writes `order_items` prices through `priceItem`: branch override, then promotional price, then list price. That's the same rule as the menu's `effective_price`. The client copy of the rule is `frontend/src/utils/price.js`. It retries up to 3 times on an `order_number` collision. The order status enum is `pending, preparing, ready, done, cancelled, hold`. When an order is billed (`POST /:id/bill`) or fully paid (`POST /:id/payments`), `deductRecipeStock` runs in the background without blocking the response. It writes BOM deductions to `ingredients` and `stock_ledger`.
 
 ### Sockets
-On connect, the server joins each socket to the room named after its role and to `all-users`. That is the only room membership. The client emits `join-role`/`join-kitchen`, but the server has no handlers for them. So `io.to('kitchen')` reaches only users whose role is `kitchen`, and `io.to('waiter')` reaches only waiters. To reach everyone, emit to `all-users` or use `io.emit`.
+The server assigns rooms on connect with `roomsFor(user)` from `backend/utils/socketRooms.js`. The client can't choose them.
+- `kitchen:<branchId>`: admin, manager, waiter and kitchen staff.
+- `floor:<branchId>`: admin, manager and waiter.
+- Admins join `kitchen:all` and `floor:all` instead of a single branch. Every socket also joins `all-users`.
+
+To send a branch's event, use `io.to(branchRooms('kitchen', order.branch_id))`. Most other events still use `io.emit`, which broadcasts to every branch.
 
 ## Frontend architecture
 

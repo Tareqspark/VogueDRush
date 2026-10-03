@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { XMarkIcon, PlusIcon, MinusIcon, TrashIcon, ClockIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
+import { itemPrice } from '../../utils/price';
 
 const now = () => {
   const d = new Date();
@@ -46,7 +47,7 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
     setCart(prev => {
       const existing = prev.find(c => c.food_item_id === item.id);
       if (existing) return prev.map(c => c.food_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { food_item_id: item.id, name: item.name, price: item.promotional_price || item.price, quantity: 1 }];
+      return [...prev, { food_item_id: item.id, name: item.name, price: itemPrice(item), quantity: 1 }];
     });
   };
 
@@ -206,7 +207,7 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
                   className="text-left p-2 rounded-xl border border-slate-100 hover:bg-sky-50 hover:border-sky-200 transition-colors"
                 >
                   <div className="text-xs font-bold text-slate-700 truncate">{item.name}</div>
-                  <div className="text-xs text-sky-600 font-semibold">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</div>
+                  <div className="text-xs text-sky-600 font-semibold">৳{itemPrice(item).toFixed(0)}</div>
                 </button>
               ))}
             </div>

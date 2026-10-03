@@ -16,6 +16,7 @@ import BackdateOrderModal from '../components/Orders/BackdateOrderModal';
 import OrdersTab from '../components/shared/OrdersTab';
 import KitchenTab from '../components/shared/KitchenTab';
 import { printReceipt } from '../utils/receipt';
+import { itemPrice } from '../utils/price';
 
 const STATUS_COLORS = {
   pending:   'bg-amber-50 text-amber-700 border-amber-200',
@@ -637,7 +638,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
   const addToCart = (item) => setToAdd(prev => {
     const ex = prev.find(c => c.food_item_id === item.id);
     if (ex) return prev.map(c => c.food_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-    return [...prev, { food_item_id: item.id, quantity: 1, name: item.name, price: item.promotional_price || item.price }];
+    return [...prev, { food_item_id: item.id, quantity: 1, name: item.name, price: itemPrice(item) }];
   });
 
   const changeAddQty = (id, delta) =>
@@ -756,7 +757,7 @@ function EditOrderModal({ api, orderId, onClose, onSaved }) {
                   className="bg-white border border-slate-100 rounded-xl p-3 text-left hover:border-sky-300 hover:shadow-card-hover transition-all active:scale-95">
                   <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
                   <div className="text-xs text-slate-400 truncate">{item.category_name}</div>
-                  <div className="mt-1 text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</div>
+                  <div className="mt-1 text-sky-600 font-black text-sm">৳{itemPrice(item).toFixed(0)}</div>
                 </button>
               ))}
             </div>
@@ -979,8 +980,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
 
   const getItemId = (item) => item?.id ?? item?.food_item_id;
   const getItemPrice = (item) => {
-    const base = item?.promotional_price ?? item?.price ?? 0;
-    const parsed = parseFloat(base);
+    const parsed = item ? itemPrice(item) : 0;
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -1273,7 +1273,7 @@ function NewOrderModal({ api, userId, onClose, onCreated }) {
                   <div className="font-bold text-slate-800 text-sm truncate">{item.name}</div>
                   <div className="text-xs text-slate-400 truncate mt-0.5">{item.category_name}</div>
                   <div className="mt-2 flex items-center justify-between">
-                    <span className="text-sky-600 font-black text-sm">৳{parseFloat(item.promotional_price || item.price).toFixed(0)}</span>
+                    <span className="text-sky-600 font-black text-sm">৳{itemPrice(item).toFixed(0)}</span>
                   </div>
                   <div className="mt-2 text-right">
                     <button

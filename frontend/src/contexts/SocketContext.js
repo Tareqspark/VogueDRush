@@ -87,15 +87,10 @@ export const SocketProvider = ({ children }) => {
       setConnectionStatus('connected');
       setReconnectAttempts(0);
       clearReconnectTimeout();
-      
-      // Join role-based room
-      socket.emit('join-role', user.role);
-      
-      // Join kitchen room if user has access
-      if (user.role === 'waiter' || user.role === 'admin') {
-        socket.emit('join-kitchen');
-      }
-      
+
+      // Room membership (kitchen/floor, per branch) is assigned by the server
+      // from the authenticated user — see backend/utils/socketRooms.js.
+
       // Show success toast if reconnecting
       if (reconnectAttempts > 0) {
         toast.success('Reconnected to server', {
@@ -157,7 +152,7 @@ export const SocketProvider = ({ children }) => {
 
     // Order-related events
     socket.on('new-order', (data) => {
-      toast.success(`New order #${data.order.order_number} received!`, {
+      toast.success(`New order #${data.order_number} received!`, {
         duration: 5000,
       });
     });
@@ -304,27 +299,6 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
-  // Join kitchen room
-  const joinKitchen = () => {
-    if (socketRef.current) {
-      socketRef.current.emit('join-kitchen');
-    }
-  };
-
-  // Leave kitchen room
-  const leaveKitchen = () => {
-    if (socketRef.current) {
-      socketRef.current.emit('leave-kitchen');
-    }
-  };
-
-  // Join role-based room
-  const joinRole = (role) => {
-    if (socketRef.current && role) {
-      socketRef.current.emit('join-role', role);
-    }
-  };
-
   // Custom emit function
   const emit = (event, data) => {
     if (socketRef.current) {
@@ -342,9 +316,6 @@ export const SocketProvider = ({ children }) => {
     reconnectAttempts,
     joinOrder,
     leaveOrder,
-    joinKitchen,
-    leaveKitchen,
-    joinRole,
     emit,
     getSocket,
     // Additional connection management functions
