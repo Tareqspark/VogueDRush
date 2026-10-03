@@ -51,7 +51,7 @@ The middleware runs in this order: CORS, helmet, the general rate limiter on `/a
 ### Schema changes go in the boot patches, not just `schema.sql`
 `database/schema.sql` only runs on an empty database (via `migrate.js`), so existing databases never pick up edits to it. Instead, `server.js` runs a list of idempotent `patch(label, sql)` calls on every startup inside `server.listen`. Errors 1050, 1060, 1061 and 1091 (already exists / already dropped) are treated as "already applied". Every later table (ingredients, suppliers, POs, GRNs, expenses, recipes, waste_logs, …) is created this way. To add a column or table, append a patch there.
 
-Production runs **MySQL 5.7**. That rules out `ADD COLUMN IF NOT EXISTS`, and DELETE/UPDATE statements can't use a subquery on their own target table (select the IDs first, then delete by ID, as the branch-isolation cleanup does). `database/schema_v2_erp_extension.sql` (the 20 "Phase 2" ERP modules) is not referenced by any code. It was applied by hand.
+Production runs **MySQL 8.0** (checked 2026-10-04; older code comments say 5.7). MySQL has no `ADD COLUMN IF NOT EXISTS` in either version, which is why the patches catch the duplicate errors instead. DELETE/UPDATE statements also can't use a subquery on their own target table (error 1093): select the IDs first, then delete by ID, as the branch-isolation cleanup does. `database/schema_v2_erp_extension.sql` (the 20 "Phase 2" ERP modules) is not referenced by any code. It was applied by hand.
 
 ### DB helpers (`backend/config/database.js`)
 - `query(sql, params)` returns the rows directly, not `[rows, fields]`. It uses `pool.query`, so `IN (?)` with an array works.
