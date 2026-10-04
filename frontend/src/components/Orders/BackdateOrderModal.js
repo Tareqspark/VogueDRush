@@ -5,6 +5,7 @@ import { XMarkIcon, PlusIcon, MinusIcon, TrashIcon, ClockIcon, MagnifyingGlassIc
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../UI/LoadingSpinner';
 import { itemPrice } from '../../utils/price';
+import QuickBackdateEntry from './QuickBackdateEntry';
 
 // datetime-local wants local time without a zone.
 const toLocalInput = (date) => {
@@ -18,6 +19,8 @@ const money = (n) => `৳${n.toFixed(2)}`;
 export default function BackdateOrderModal({ onClose, onCreated }) {
   const { api, user, selectedBranch } = useAuth();
 
+  // 'quick': date + amount + name (the usual case). 'itemized': full menu entry.
+  const [mode, setMode] = useState('quick');
   const [backdatedAt, setBackdatedAt] = useState('');
   const [reason, setReason] = useState('');
   const [orderType, setOrderType] = useState('dine_in');
@@ -48,15 +51,17 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
     setScPct(prev => prev ?? String(options.service_charge_percentage));
   }, [options]);
 
-  const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data));
+  const { data: categoriesData } = useQuery('categories', () => api.get('/menu/categories').then(r => r.data), { enabled: mode === 'itemized' });
   // No is_available filter: availability is about today, and this sale is in the past.
   const { data: itemsData } = useQuery(
     ['backdate-menu', categoryFilter, menuSearch],
-    () => api.get('/menu/items', { params: { category_id: categoryFilter || undefined, search: menuSearch || undefined } }).then(r => r.data)
+    () => api.get('/menu/items', { params: { category_id: categoryFilter || undefined, search: menuSearch || undefined } }).then(r => r.data),
+    { enabled: mode === 'itemized' }
   );
   const { data: tablesData } = useQuery(
     'tables-list',
-    () => api.get('/tables', { params: { branch_id: selectedBranch?.id } }).then(r => r.data)
+    () => api.get('/tables', { params: { branch_id: selectedBranch?.id } }).then(r => r.data),
+    { enabled: mode === 'itemized' }
   );
 
   const categories = categoriesData?.categories || [];
@@ -160,6 +165,27 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-slate-100"><XMarkIcon className="h-5 w-5 text-slate-400" /></button>
         </div>
 
+        <div className="px-6 pt-4 shrink-0">
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100">
+            {[['quick', 'Quick entry'], ['itemized', 'Itemized']].map(([value, label]) => (
+              <button key={value} type="button" onClick={() => setMode(value)}
+                className={`py-1.5 rounded-lg text-sm font-bold transition-colors ${mode === value ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {mode === 'quick' ? (
+          <QuickBackdateEntry
+            api={api}
+            options={options}
+            selectedBranch={selectedBranch}
+            onSaved={(addAnother) => onCreated(addAnother)}
+            onClose={onClose}
+          />
+        ) : (
+        <>
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
 
           {/* Date/time + type */}
@@ -405,6 +431,8 @@ export default function BackdateOrderModal({ onClose, onCreated }) {
             </button>
           </div>
         </div>
+        </>
+        )}
 
       </div>
     </div>

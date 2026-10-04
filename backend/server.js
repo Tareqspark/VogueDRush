@@ -575,6 +575,9 @@ server.listen(PORT, async () => {
     `ALTER TABLE orders ADD COLUMN backdated_by INT NULL`);
   await patch('orders.backdate_entered_at',
     `ALTER TABLE orders ADD COLUMN backdate_entered_at TIMESTAMP NULL`);
+  // Quick entries are backdated lump sums: an amount and a name, no order_items.
+  await patch('orders.is_quick_entry',
+    `ALTER TABLE orders ADD COLUMN is_quick_entry TINYINT(1) NOT NULL DEFAULT 0`);
   await patch('backdate_manager_max_days setting', `
     INSERT IGNORE INTO system_settings (setting_key, setting_value, description, data_type)
     VALUES ('backdate_manager_max_days', '7',

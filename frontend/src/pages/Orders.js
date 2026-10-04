@@ -285,7 +285,11 @@ export default function Orders() {
       {showBackdate && (
         <BackdateOrderModal
           onClose={() => setShowBackdate(false)}
-          onCreated={() => { setShowBackdate(false); queryClient.invalidateQueries('orders'); }}
+          onCreated={(keepOpen) => {
+            // Quick entry's "Save & add another" keeps the window open.
+            if (!keepOpen) setShowBackdate(false);
+            queryClient.invalidateQueries('orders');
+          }}
         />
       )}
     </div>

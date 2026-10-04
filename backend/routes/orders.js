@@ -348,7 +348,7 @@ router.get('/receipts/history', requireRole(['admin', 'manager']), scopeBranch, 
     if (end_date)   { whereClause += ' AND DATE(o.bill_printed_at) <= ?'; values.push(end_date); }
 
     const rows = await query(
-      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone, o.is_backdated,
+      `SELECT o.id, o.order_number, o.order_type, o.status, o.customer_name, o.customer_phone, o.is_backdated, o.is_quick_entry,
               o.subtotal, o.vat_amount, o.service_charge, o.discount_amount, o.total_amount,
               o.bill_printed_at, u.full_name AS waiter_name, t.table_number,
               p.payment_method, p.transaction_id, p.amount AS paid_amount, p.created_at AS payment_time
@@ -386,7 +386,7 @@ router.get('/transactions/report', requireRole(['admin', 'manager']), scopeBranc
 
     const txns = await query(
       `SELECT p.id, p.order_id, p.payment_method, p.amount, p.transaction_id, p.created_at,
-              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount, o.is_backdated,
+              o.order_number, o.order_type, o.status AS order_status, o.discount_amount, o.total_amount, o.is_backdated, o.is_quick_entry,
               o.customer_name, o.customer_phone, u.full_name AS waiter_name
        FROM payments p
        JOIN orders o ON o.id = p.order_id
@@ -646,6 +646,19 @@ const optionalPercent = (value, label) => {
   return pct;
 };
 
+// Runs fn(conn) in one transaction, retrying when the random order number collides
+// with an existing one (ER_DUP_ENTRY), up to three tries.
+const inOrderTransaction = async (fn) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await transaction(fn);
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY' && attempt < 2) continue;
+      throw err;
+    }
+  }
+};
+
 // What the backdate form needs: who can be credited as having served, how far back
 // this user may go (null = no limit), and today's charges to prefill.
 router.get('/backdate/options', requireRole(['admin', 'manager']), scopeBranch, async (req, res) => {
@@ -764,85 +777,76 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
 
     // One transaction, so a failure part-way never leaves an order without its
     // lines, payment or stock movement. Retries on an order_number collision.
-    let saved;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        saved = await transaction(async (conn) => {
-          const { totals, lines } = await calculateOrderTotals(lineItems, order_type, conn, orderBranchId, overrides);
-          const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
-          const totalAmount = Math.max(0, totals.total_amount - safeDiscount);
-          const orderNumber = generateOrderNumber(backdatedDate);
+    const saved = await inOrderTransaction(async (conn) => {
+      const { totals, lines } = await calculateOrderTotals(lineItems, order_type, conn, orderBranchId, overrides);
+      const safeDiscount = Math.max(0, parseFloat(discount_amount) || 0);
+      const totalAmount = Math.max(0, totals.total_amount - safeDiscount);
+      const orderNumber = generateOrderNumber(backdatedDate);
 
-          const [orderResult] = await conn.query(
-            `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
-              customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
-              delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
-              is_backdated, backdate_reason, backdated_by, backdate_entered_at,
-              created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, NOW(), ?, ?)`,
-            [
-              orderNumber, orderBranchId, order_type,
-              order_type === 'dine_in' ? (table_id || null) : null,
-              servedBy,
-              ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
-              ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
-              totals.subtotal, totals.vat_amount, totals.service_charge,
-              totals.delivery_fee, safeDiscount, totalAmount,
-              backdatedDate,
-              reason.trim(), req.user.id,
-              backdatedDate, backdatedDate,
-            ]
-          );
-          const orderId = orderResult.insertId;
+      const [orderResult] = await conn.query(
+        `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
+          customer_name, customer_phone, status, subtotal, vat_amount, service_charge,
+          delivery_fee, discount_amount, total_amount, bill_printed, bill_printed_at,
+          is_backdated, backdate_reason, backdated_by, backdate_entered_at,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, NOW(), ?, ?)`,
+        [
+          orderNumber, orderBranchId, order_type,
+          order_type === 'dine_in' ? (table_id || null) : null,
+          servedBy,
+          ['delivery', 'direct'].includes(order_type) ? (customer_name || null) : null,
+          ['delivery', 'direct'].includes(order_type) ? (customer_phone || null) : null,
+          totals.subtotal, totals.vat_amount, totals.service_charge,
+          totals.delivery_fee, safeDiscount, totalAmount,
+          backdatedDate,
+          reason.trim(), req.user.id,
+          backdatedDate, backdatedDate,
+        ]
+      );
+      const orderId = orderResult.insertId;
 
-          // Lines are ready (no kitchen queue: the food went out long ago).
-          for (const [i, item] of lineItems.entries()) {
-            const { unitPrice } = lines[i];
-            await conn.query(
-              `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
-              [orderId, item.food_item_id, item.quantity, unitPrice, unitPrice * item.quantity,
-               item.special_instructions, backdatedDate]
-            );
-            // The food was really sold, but a past sale can't be refused for lack of
-            // stock today, so floor at zero rather than checking first.
-            await conn.query(
-              'UPDATE food_inventory SET current_stock = GREATEST(0, current_stock - ?), last_updated = NOW() WHERE food_item_id = ?',
-              [item.quantity, item.food_item_id]
-            );
-          }
-
-          // Delivery screens and the delivery report only list orders with a details row.
-          // The order is already paid in full, so nothing is due and it was delivered.
-          if (order_type === 'delivery') {
-            await conn.query(
-              `INSERT INTO delivery_details (order_id, customer_address, delivery_phone, advance_payment,
-                due_amount, delivery_status, delivery_notes, created_at)
-               VALUES (?, ?, ?, 0, 0, 'delivered', ?, ?)`,
-              [orderId, (delivery_details.customer_address || '').trim(), customer_phone || null,
-               delivery_details.delivery_notes || null, backdatedDate]
-            );
-          }
-
-          const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
-          await conn.query(
-            `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
-             VALUES (?, ?, ?, ?, 'completed', ?)`,
-            [orderId, payment_method, totalAmount,
-             payment_last4 ? `${payment_method.toUpperCase()}${txnSuffix}` : null,
-             backdatedDate]
-          );
-
-          await deductRecipeStock(orderId, orderBranchId, req.user.id, runner(conn), `Backdated sale ${orderNumber}`);
-
-          return { orderId, orderNumber, totalAmount };
-        });
-        break;
-      } catch (txErr) {
-        if (txErr.code === 'ER_DUP_ENTRY' && attempt < 2) continue;
-        throw txErr;
+      // Lines are ready (no kitchen queue: the food went out long ago).
+      for (const [i, item] of lineItems.entries()) {
+        const { unitPrice } = lines[i];
+        await conn.query(
+          `INSERT INTO order_items (order_id, food_item_id, quantity, unit_price, total_price, special_instructions, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)`,
+          [orderId, item.food_item_id, item.quantity, unitPrice, unitPrice * item.quantity,
+           item.special_instructions, backdatedDate]
+        );
+        // The food was really sold, but a past sale can't be refused for lack of
+        // stock today, so floor at zero rather than checking first.
+        await conn.query(
+          'UPDATE food_inventory SET current_stock = GREATEST(0, current_stock - ?), last_updated = NOW() WHERE food_item_id = ?',
+          [item.quantity, item.food_item_id]
+        );
       }
-    }
+
+      // Delivery screens and the delivery report only list orders with a details row.
+      // The order is already paid in full, so nothing is due and it was delivered.
+      if (order_type === 'delivery') {
+        await conn.query(
+          `INSERT INTO delivery_details (order_id, customer_address, delivery_phone, advance_payment,
+            due_amount, delivery_status, delivery_notes, created_at)
+           VALUES (?, ?, ?, 0, 0, 'delivered', ?, ?)`,
+          [orderId, (delivery_details.customer_address || '').trim(), customer_phone || null,
+           delivery_details.delivery_notes || null, backdatedDate]
+        );
+      }
+
+      const txnSuffix = payment_last4 ? `-${payment_last4}` : '';
+      await conn.query(
+        `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'completed', ?)`,
+        [orderId, payment_method, totalAmount,
+         payment_last4 ? `${payment_method.toUpperCase()}${txnSuffix}` : null,
+         backdatedDate]
+      );
+
+      await deductRecipeStock(orderId, orderBranchId, req.user.id, runner(conn), `Backdated sale ${orderNumber}`);
+
+      return { orderId, orderNumber, totalAmount };
+    });
 
     await logManualAudit(
       req.user.id, 'backdate_order', 'orders', saved.orderId, null,
@@ -871,6 +875,111 @@ router.post('/backdate', requireRole(['admin', 'manager']), async (req, res) => 
   } catch (error) {
     console.error('Backdate order error:', error);
     res.status(error.status || 500).json({ error: error.message || 'Failed to create backdated order' });
+  }
+});
+
+// Quick entry: a past sale kept as a lump sum — a date, an amount and a name, with no
+// menu items, kitchen or stock. The amount is the total paid and includes VAT at the
+// current rate. Always saved as a takeaway, credited to whoever entered it.
+const QUICK_ENTRY_ORDER_TYPE = 'direct';
+
+router.post('/backdate/quick', requireRole(['admin', 'manager']), async (req, res) => {
+  try {
+    const { date, amount, name, payment_method = 'cash', payment_last4, note } = req.body;
+
+    if (!isDay(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const totalAmount = Math.round(parseFloat(amount) * 100) / 100;
+    if (!(totalAmount > 0) || totalAmount > 10000000) {
+      return res.status(400).json({ error: 'Amount must be more than 0' });
+    }
+    const label = String(name || '').trim();
+    if (!label) return res.status(400).json({ error: 'Name is required' });
+    if (label.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    const noteText = String(note || '').trim();
+    if (noteText.length > 500) return res.status(400).json({ error: 'Note must be 500 characters or fewer' });
+    if (!['cash', 'card', 'bkash', 'nagad'].includes(payment_method)) {
+      return res.status(400).json({ error: 'Invalid payment method' });
+    }
+    // Optional here, unlike the itemized form — but if given it must be 4 digits.
+    if (payment_last4 && !/^\d{4}$/.test(String(payment_last4))) {
+      return res.status(400).json({ error: 'Last 4 digits must be 4 numbers' });
+    }
+
+    // Business days run 06:00–06:00 Dhaka, which on this UTC server is the UTC date.
+    // Save at noon Dhaka (06:00 UTC) so the entry sits inside the chosen day; for
+    // today before noon, use now.
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    if (date > today) return res.status(400).json({ error: 'That day has not started yet' });
+    if (req.user.role !== 'admin') {
+      const maxDays = await managerBackdateDays();
+      const earliest = new Date(Date.parse(today) - maxDays * 86400000).toISOString().slice(0, 10);
+      if (date < earliest) {
+        return res.status(403).json({
+          error: `Managers can backdate up to ${maxDays} days. Ask an admin to enter older sales.`,
+          code: 'BACKDATE_TOO_OLD',
+        });
+      }
+    }
+    const saleAt = new Date(Math.min(Date.parse(`${date}T06:00:00Z`), now.getTime()));
+
+    const orderBranchId = await resolveOrderBranch(req, QUICK_ENTRY_ORDER_TYPE, null);
+    if (!orderBranchId) {
+      const { status, ...body } = branchRequiredError(req);
+      return res.status(status).json(body);
+    }
+
+    // VAT is inside the amount: split it out so subtotal + VAT is exactly the amount.
+    const { vatPercentage } = await loadChargeSettings(query);
+    const subtotal = Math.round((totalAmount / (1 + vatPercentage / 100)) * 100) / 100;
+    const vatAmount = Math.round((totalAmount - subtotal) * 100) / 100;
+
+    const saved = await inOrderTransaction(async (conn) => {
+      const orderNumber = generateOrderNumber(saleAt);
+      const [orderResult] = await conn.query(
+        `INSERT INTO orders (order_number, branch_id, order_type, table_id, waiter_id,
+          customer_name, status, subtotal, vat_amount, service_charge, delivery_fee,
+          discount_amount, total_amount, bill_printed, bill_printed_at,
+          is_backdated, is_quick_entry, backdate_reason, backdated_by, backdate_entered_at,
+          created_at, updated_at)
+         VALUES (?, ?, ?, NULL, ?, ?, 'done', ?, ?, 0, 0, 0, ?, 1, ?, 1, 1, ?, ?, NOW(), ?, ?)`,
+        [
+          orderNumber, orderBranchId, QUICK_ENTRY_ORDER_TYPE, req.user.id,
+          label, subtotal, vatAmount, totalAmount, saleAt,
+          noteText || 'Quick entry', req.user.id,
+          saleAt, saleAt,
+        ]
+      );
+      const orderId = orderResult.insertId;
+
+      await conn.query(
+        `INSERT INTO payments (order_id, payment_method, amount, transaction_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'completed', ?)`,
+        [orderId, payment_method, totalAmount,
+         payment_last4 ? `${payment_method.toUpperCase()}-${payment_last4}` : null,
+         saleAt]
+      );
+
+      return { orderId, orderNumber };
+    });
+
+    await logManualAudit(
+      req.user.id, 'backdate_quick_entry', 'orders', saved.orderId, null,
+      { order_number: saved.orderNumber, date, name: label, amount: totalAmount, vat_percentage: vatPercentage, payment_method, note: noteText || null },
+      req.ip, req.headers['user-agent']
+    );
+
+    res.status(201).json({
+      message: 'Quick entry saved',
+      order_id: saved.orderId,
+      order_number: saved.orderNumber,
+      total_amount: totalAmount,
+      vat_amount: vatAmount,
+      sale_at: saleAt,
+    });
+  } catch (error) {
+    console.error('Quick backdate entry error:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to save quick entry' });
   }
 });
 

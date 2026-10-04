@@ -7,7 +7,7 @@ export function BackdatedBadge({ order }) {
   if (!order?.is_backdated) return null;
   return (
     <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 font-semibold">
-      <ClockIcon className="h-3 w-3" /> Backdated
+      <ClockIcon className="h-3 w-3" /> {order.is_quick_entry ? 'Backdated · quick' : 'Backdated'}
     </span>
   );
 }
@@ -26,7 +26,9 @@ export function BackdateNote({ order }) {
   const enteredAt = order.backdate_entered_at ? new Date(order.backdate_entered_at).toLocaleString() : null;
   return (
     <div className="rounded-xl bg-violet-50 border border-violet-200 p-3 text-sm text-violet-800">
-      <div className="font-bold">Backdated entry</div>
+      <div className="font-bold">
+        {order.is_quick_entry ? 'Backdated quick entry · lump sum, no item breakdown' : 'Backdated entry'}
+      </div>
       <div className="text-xs mt-0.5">
         Sale dated {new Date(order.created_at).toLocaleString()}
         {order.backdated_by_name ? ` · entered by ${order.backdated_by_name}` : ''}
